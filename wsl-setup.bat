@@ -135,26 +135,53 @@ echo.
 echo Waiting for !selectedFriendly! to finish initializing ...
 echo ^(a first-ever WSL launch on this PC can take several minutes -
 echo   it is extracting and booting the distro for the first time^)
-set /a tries=0
-:WAITLOOP
-wsl.exe -d "!selectedName!" -u root -- true >nul 2>&1
-if "!errorlevel!"=="0" goto READY
-set /a tries+=1
-set /a elapsed=tries*5
-set /a remainder=tries %% 6
-if "!remainder!"=="0" echo   ... still waiting ^(!elapsed! seconds so far^), this is normal on a first install
-if !tries! GEQ 60 (
-    echo [ERROR] !selectedFriendly! did not become ready after 5 minutes.
-    echo         Try launching it manually first: wsl -d !selectedName!
-    echo         If that also hangs, Windows may need a restart to finish
-    echo         enabling WSL. Restart your PC, then run this tool again
-    echo         and pick the same option - it will pick up where it left off.
+
+set "waitScript=%TEMP%\wsl_wait_progress.ps1"
+(
+    echo param^([string]$DistroName^)
+    echo $rebootKeys = @^(
+    echo     'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending',
+    echo     'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\PendingFileRenameOperations'
+    echo ^)
+    echo for ^($i = 0; $i -lt 60; $i++^) {
+    echo     $elapsed = $i * 5
+    echo     $pct = [Math]::Min^(100, [Math]::Round^($elapsed / 300 * 100^)^)
+    echo     Write-Progress -Activity "Waiting for $DistroName to finish initializing" -Status "$elapsed sec / 300 sec (first-time boot can take a while)" -PercentComplete $pct
+    echo     ^& wsl.exe -d $DistroName -u root -- true 2^>$null
+    echo     if ^($LASTEXITCODE -eq 0^) { Write-Progress -Activity done -Completed; exit 0 }
+    echo     foreach ^($k in $rebootKeys^) {
+    echo         if ^(Test-Path $k^) { Write-Progress -Activity done -Completed; exit 2 }
+    echo     }
+    echo     Start-Sleep -Seconds 5
+    echo }
+    echo Write-Progress -Activity done -Completed
+    echo exit 1
+) > "!waitScript!"
+
+powershell -NoProfile -ExecutionPolicy Bypass -File "!waitScript!" -DistroName "!selectedName!"
+set "waitResult=!errorlevel!"
+
+if "!waitResult!"=="0" goto READY
+
+if "!waitResult!"=="2" (
+    echo [ERROR] Windows needs a restart to finish enabling WSL.
+    echo         A pending-restart flag was detected - !selectedFriendly! cannot
+    echo         finish starting until you reboot. Restart your PC, then run
+    echo         this tool again and pick the same option - it will pick up
+    echo         where it left off.
     set "wslPass="
     pause
     goto MENU
 )
-timeout /t 5 >nul
-goto WAITLOOP
+
+echo [ERROR] !selectedFriendly! did not become ready after 5 minutes.
+echo         Try launching it manually first: wsl -d !selectedName!
+echo         If that also hangs, Windows may need a restart to finish
+echo         enabling WSL. Restart your PC, then run this tool again
+echo         and pick the same option - it will pick up where it left off.
+set "wslPass="
+pause
+goto MENU
 
 :READY
 echo Creating user "!wslUser!" automatically ...
