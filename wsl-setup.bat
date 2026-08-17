@@ -56,14 +56,20 @@ if %errorlevel% neq 0 (
 
     wsl -d %DISTRO% -u root -- bash -c "useradd -m -s /bin/bash -G sudo %WSLUSER%"
     wsl -d %DISTRO% -u root -- bash -c "echo \"%WSLUSER%:$WSLPASS\" | chpasswd"
-    wsl -d %DISTRO% -u root -- bash -c "echo '%WSLUSER% ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/%WSLUSER% && chmod 440 /etc/sudoers.d/%WSLUSER%"
-    wsl -d %DISTRO% -u root -- bash -c "sed -i '/^\[user\]/,+1d' /etc/wsl.conf 2>/dev/null; printf '[user]\ndefault=%WSLUSER%\n\n' >> /etc/wsl.conf"
-
     set "WSLPASS="
+) else (
+    echo User %WSLUSER% already exists.
+)
+
+:: always ensure passwordless sudo (idempotent, covers pre-existing users too)
+wsl -d %DISTRO% -u root -- bash -c "echo '%WSLUSER% ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/%WSLUSER% && chmod 440 /etc/sudoers.d/%WSLUSER%"
+
+:: only touch wsl.conf / restart if %WSLUSER% isn't already the configured default
+wsl -d %DISTRO% -u root -- bash -c "grep -q '^default=%WSLUSER%$' /etc/wsl.conf 2>/dev/null"
+if %errorlevel% neq 0 (
+    wsl -d %DISTRO% -u root -- bash -c "sed -i '/^\[user\]/,+1d' /etc/wsl.conf 2>/dev/null; printf '[user]\ndefault=%WSLUSER%\n\n' >> /etc/wsl.conf"
     echo Restarting %DISTRO% to apply default user...
     wsl --terminate %DISTRO%
-) else (
-    echo User %WSLUSER% already exists - skipping account creation.
 )
 
 :: ---- run dev tools setup (nvm/Node, Docker, gh) - no prompts, passwordless sudo ----
@@ -80,7 +86,11 @@ echo.
 echo Restarting WSL once more to activate systemd for Docker...
 wsl --shutdown
 timeout /t 3 /nobreak >nul
-wsl -d %DISTRO% -- bash -c "whoami; node -v; docker --version; gh --version"
+
+:: systemd is only active from this restart onward - enable/start docker now that it's up
+wsl -d %DISTRO% -- bash -c "sudo systemctl enable --now docker 2>/dev/null || true"
+
+wsl -d %DISTRO% -- bash -c "whoami; export NVM_DIR=\"$HOME/.nvm\"; [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\"; node -v; docker --version; systemctl is-active docker 2>/dev/null; gh --version"
 
 :: ---- GitHub auth (non-interactive, via Personal Access Token) ----
 wsl -d %DISTRO% -- bash -c "gh auth status" >nul 2>&1
