@@ -192,14 +192,27 @@ set "wslPass="
 
 echo Restarting !selectedFriendly! so the new default user takes effect ...
 wsl.exe --terminate "!selectedName!" >nul 2>&1
-timeout /t 2 >nul
 
 echo.
 echo =========================================================
 echo   Verifying registration
 echo =========================================================
-wsl.exe -d "!selectedName!" -u "!wslUser!" -- id -un >nul 2>&1
-if "!errorlevel!"=="0" (
+REM --- Right after --terminate the WSL service can briefly report
+REM     WSL_E_DISTRO_NOT_FOUND even though the distro is fine - retry
+REM     instead of failing on the first check.
+set "verifyOk=0"
+for /l %%i in (1,1,10) do (
+    if "!verifyOk!"=="0" (
+        wsl.exe -d "!selectedName!" -u "!wslUser!" -- id -un >nul 2>&1
+        if "!errorlevel!"=="0" (
+            set "verifyOk=1"
+        ) else (
+            timeout /t 2 >nul
+        )
+    )
+)
+
+if "!verifyOk!"=="1" (
     echo [OK] User "!wslUser!" is registered in !selectedFriendly!.
 ) else (
     echo [WARN] Could not confirm user "!wslUser!". Check manually with:
