@@ -2,28 +2,33 @@
 
 ![wsl-setup](assets/banner.svg)
 
-Interactive, guided WSL setup wizard for a Windows PC. Run one `.bat` file and it walks you through: entering a username/password, enabling WSL on the machine if it isn't already (with an auto-resume after the required reboot), and picking a Linux distro from a numbered menu to install.
+Fully automatic WSL setup for a Windows PC. Run one `.bat` file, pick a distro from a 3-item menu, and it does the rest — no interactive WSL setup wizard, no typing anything except a username/password once.
 
 ## Usage
 
 1. Clone or download this repo onto your Windows machine.
-2. Run `wsl-setup.bat` (just double-click it, or run from `cmd.exe`).
-3. Enter a username and password when prompted. **These are shown on screen in plain text as you type and saved in plain text to `credentials.txt` next to the script** — this is intentional for this interactive variant, not a bug. Don't reuse a real/sensitive password here.
-4. If WSL isn't enabled yet on this machine, the script requests admin rights, enables it, and offers to restart. If you restart, it automatically continues where it left off after you log back in (via a one-time registry `RunOnce` entry) — no need to re-run it yourself.
-5. Pick a distro from the numbered menu (1–22, e.g. `1` for Ubuntu, `10` for Debian) and it installs it via `wsl --install -d <name>`.
-6. When the new distro opens for the first time to create its own Linux user, use the same username/password you entered in step 3.
+2. Run `wsl-setup.bat` (double-click it, or run from `cmd.exe`). It self-elevates to Administrator via UAC.
+3. Pick an option:
+   - `1` Ubuntu (latest LTS)
+   - `2` Debian (lighter/smaller than Ubuntu)
+   - `3` Wine (installs into a distro you already have)
+4. For options 1/2, enter a new Linux username and password when prompted (password input is masked).
+5. The script installs the distro (`wsl --install -d <name> --no-launch --web-download`), waits for it to become ready, then creates the Linux user itself — `useradd`, `chpasswd`, adds to `sudo`, and grants **passwordless sudo** (`/etc/sudoers.d/<user>`, validated with `visudo -c`) so system commands run without a prompt.
+6. It sets that user as the distro's default user, sets the distro as the **machine's** default (`wsl --set-default`), and verifies that typing plain `wsl` in any terminal drops straight into that user with no prompts.
+7. It writes/refreshes `start-wsl.bat` next to itself — a one-line launcher (`wsl.exe`) for quick access afterward.
+8. On success the window closes itself after a few seconds; on any error it pauses so you can read what went wrong.
 
-If WSL is already enabled on the machine (the common case), no admin elevation or reboot happens at all — it goes straight from credentials to the distro menu.
+## What it does differently from the built-in `wsl --install` wizard
 
-## What it does
+- **No plaintext credentials anywhere.** The password lives only in the running script's memory, is passed straight to `wsl.exe` to create the account, then is cleared (`set "wslPass="`) immediately after use. Nothing is written to a log, temp file, or disk.
+- **Bypasses two documented first-install pitfalls:** uses `--web-download` (Microsoft's own fix for installs hanging at 0.0%) and checks the Windows build number up front (WSL needs build 19041+), instead of failing partway with a confusing error.
+- **Explains the reboot case.** A first-ever WSL install on a machine can require a Windows restart partway through; if that happens, the script says so plainly and tells you to just re-run it afterward.
 
-`wsl-setup.bat`:
-- Prompts for a username/password (plain text, saved locally to `credentials.txt`).
-- Checks `wsl --status`; only elevates to Administrator and enables WSL2 + required Windows features if it isn't already set up.
-- If a reboot is required, sets a `RunOnce` registry entry so the script auto-resumes after login instead of needing to be re-run manually.
-- Shows a numbered menu of every distro currently available via `wsl --list --online` and installs the one you pick.
+## Wine option
 
-`setup-dev-tools.sh` (nvm/Node, Docker, GitHub CLI — run separately inside a WSL distro, no longer auto-chained by `wsl-setup.bat`):
+Choose `3` from the menu to install Wine (`wine`, `wine32`, `wine64`, `winetricks`) into an already-installed distro. If more than one distro is installed, you're asked which one. It runs as `root` inside WSL (not via `sudo`), so there's no password prompt, and `apt` output is shown live in the same window.
+
+`setup-dev-tools.sh` (nvm/Node, Docker, GitHub CLI — run separately inside a WSL distro, not chained by `wsl-setup.bat`):
 
 ```bash
 bash setup-dev-tools.sh
@@ -31,5 +36,5 @@ bash setup-dev-tools.sh
 
 ## Notes
 
-- Password is intentionally shown and stored in plain text (`credentials.txt`) by design for this interactive flow — delete that file when you're done if you don't want it lingering.
-- `credentials.txt` and `wsl_setup_state.txt` are working files the script creates next to itself; safe to delete once setup is finished.
+- The created Linux user has **passwordless sudo** — convenient for a personal dev machine, but means any process running as that user can act as root without a password. Don't use this on a shared or security-sensitive machine.
+- Re-running the script against a distro that's already installed is safe — user creation is idempotent (`id -u ... || useradd ...`).

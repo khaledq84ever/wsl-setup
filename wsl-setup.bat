@@ -1,185 +1,294 @@
 @echo off
 setlocal EnableDelayedExpansion
-title WSL Full Setup Wizard
+title WSL Setup
 
-set "SCRIPT_PATH=%~f0"
-set "CRED_FILE=%~dp0credentials.txt"
-set "STATE_FILE=%~dp0wsl_setup_state.txt"
-set "RUNONCE_KEY=HKCU\Software\Microsoft\Windows\CurrentVersion\RunOnce"
-set "RUNONCE_NAME=WSLFullSetup"
+REM =====================================================================
+REM  wsl-setup.bat
+REM  Simple 2-option WSL installer with fully automatic user creation
+REM =====================================================================
 
-echo ================================================
-echo   WSL Full Setup Wizard
-echo ================================================
-echo.
-
-rem ==========================================================
-rem  Figure out if we're resuming after a reboot
-rem ==========================================================
-set "RESUME_STAGE=START"
-if exist "%STATE_FILE%" (
-    set /p RESUME_STAGE=<"%STATE_FILE%"
+REM --- Self-elevate to Administrator ---
+net session >nul 2>&1
+if not "%errorlevel%"=="0" (
+    echo This tool needs Administrator rights. Requesting elevation...
+    powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
+    exit /b
 )
 
-if /i "!RESUME_STAGE!"=="AFTER_ENABLE" (
-    echo Resuming setup after restart...
+REM --- Check Windows version supports WSL (needs Win10 build 19041+ or Win11) ---
+for /f "usebackq delims=" %%b in (`powershell -NoProfile -Command "[System.Environment]::OSVersion.Version.Build"`) do set "winBuild=%%b"
+if !winBuild! LSS 19041 (
+    cls
+    echo =========================================================
+    echo   [ERROR] Windows build !winBuild! is too old for WSL.
+    echo =========================================================
     echo.
-    if exist "%CRED_FILE%" (
-        for /f "usebackq tokens=1,2 delims==" %%A in ("%CRED_FILE%") do (
-            if /i "%%A"=="Username" set "USERNAME=%%B"
-            if /i "%%A"=="Password" set "PASSWORD=%%B"
+    echo   WSL needs Windows 10 build 19041 or higher, or Windows 11.
+    echo   Update Windows first, then run this tool again. See:
+    echo   https://learn.microsoft.com/windows/wsl/install-manual
+    echo.
+    pause
+    exit /b
+)
+
+:MENU
+cls
+echo =========================================================
+echo                 WSL AUTO SETUP
+echo =========================================================
+echo.
+echo   First time installing WSL on this PC? A restart may be
+echo   needed partway through - if this tool stops and says so,
+echo   just restart and run it again; it will continue safely.
+echo.
+echo   1.  Ubuntu   (Ubuntu, latest LTS - full-featured, larger)
+echo   2.  Debian   (Debian GNU/Linux - small and lightweight)
+echo   3.  Wine     (install Wine into a distro you already have)
+echo   0.  Exit
+echo.
+
+set "choice="
+set /p choice="Choose an option: "
+
+if "%choice%"=="0" goto END
+if "%choice%"=="1" (
+    set "selectedName=Ubuntu"
+    set "selectedFriendly=Ubuntu (latest LTS)"
+    goto GOTCHOICE
+)
+if "%choice%"=="2" (
+    set "selectedName=Debian"
+    set "selectedFriendly=Debian GNU/Linux"
+    goto GOTCHOICE
+)
+if "%choice%"=="3" goto WINEMENU
+
+echo.
+echo [ERROR] "%choice%" is not a valid option.
+echo.
+pause
+goto MENU
+
+:GOTCHOICE
+echo.
+echo =========================================================
+echo   Selected: !selectedFriendly!   [wsl.exe --install -d !selectedName!]
+echo =========================================================
+echo.
+echo   Set up the Linux account now - it will be created
+echo   automatically, no need to type anything during install.
+echo.
+
+set "wslUser="
+set /p wslUser="  New Linux username: "
+if "!wslUser!"=="" (
+    echo [ERROR] Username cannot be empty.
+    pause
+    goto MENU
+)
+
+for /f "usebackq delims=" %%p in (`powershell -NoProfile -Command "$s = Read-Host -AsSecureString '  New Linux password'; $b = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($s); [Runtime.InteropServices.Marshal]::PtrToStringAuto($b)"`) do set "wslPass=%%p"
+
+if "!wslPass!"=="" (
+    echo [ERROR] Password cannot be empty.
+    pause
+    goto MENU
+)
+
+echo.
+echo Installing !selectedFriendly! ...
+echo ^(--web-download is used to avoid a known WSL bug where install
+echo   can hang at 0.0%% - see Microsoft's WSL install docs^)
+wsl.exe --install -d "!selectedName!" --no-launch --web-download
+if not "!errorlevel!"=="0" (
+    echo [ERROR] wsl.exe --install failed for "!selectedName!".
+    echo         If this is the very first WSL install on this PC, Windows
+    echo         may need a restart to finish enabling WSL. Restart, then
+    echo         run this tool again.
+    set "wslPass="
+    pause
+    goto MENU
+)
+
+echo.
+echo Waiting for !selectedFriendly! to finish initializing ...
+set /a tries=0
+:WAITLOOP
+wsl.exe -d "!selectedName!" -u root -- true >nul 2>&1
+if "!errorlevel!"=="0" goto READY
+set /a tries+=1
+if !tries! GEQ 20 (
+    echo [ERROR] !selectedFriendly! did not become ready in time.
+    echo         This usually means Windows needs a restart to finish
+    echo         enabling WSL for the first time. Restart your PC, then
+    echo         run this tool again and pick the same option -
+    echo         it will pick up where it left off.
+    set "wslPass="
+    pause
+    goto MENU
+)
+timeout /t 3 >nul
+goto WAITLOOP
+
+:READY
+echo Creating user "!wslUser!" automatically ...
+echo Granting passwordless sudo so system commands run without a prompt ...
+wsl.exe -d "!selectedName!" -u root -- bash -c "id -u '!wslUser!' >/dev/null 2>&1 || useradd -m -s /bin/bash '!wslUser!'; echo '!wslUser!:!wslPass!' | chpasswd; usermod -aG sudo '!wslUser!' 2>/dev/null; printf '%s ALL=(ALL) NOPASSWD:ALL\n' '!wslUser!' > /etc/sudoers.d/'!wslUser!'; chmod 0440 /etc/sudoers.d/'!wslUser!'; printf '[user]\ndefault=%s\n' '!wslUser!' > /etc/wsl.conf"
+
+set "wslPass="
+
+echo Restarting !selectedFriendly! so the new default user takes effect ...
+wsl.exe --terminate "!selectedName!" >nul 2>&1
+timeout /t 2 >nul
+
+echo.
+echo =========================================================
+echo   Verifying registration
+echo =========================================================
+wsl.exe -d "!selectedName!" -u "!wslUser!" -- id -un >nul 2>&1
+if "!errorlevel!"=="0" (
+    echo [OK] User "!wslUser!" is registered in !selectedFriendly!.
+) else (
+    echo [WARN] Could not confirm user "!wslUser!". Check manually with:
+    echo        wsl -d "!selectedName!" cat /etc/passwd
+    pause
+    goto ASKAGAIN
+)
+
+for /f "usebackq delims=" %%w in (`wsl.exe -d "!selectedName!" -- whoami`) do set "defUser=%%w"
+if /i "!defUser!"=="!wslUser!" (
+    echo [OK] "!wslUser!" is set as the default user in !selectedFriendly!.
+) else (
+    echo [WARN] Default user may not be applied yet ^(got "!defUser!"^). Try:
+    echo        wsl --terminate "!selectedName!"  then  wsl -d !selectedName!
+)
+
+echo Making !selectedFriendly! the default so plain "wsl" opens it ...
+wsl.exe --set-default "!selectedName!" >nul 2>&1
+
+for /f "usebackq delims=" %%c in (`wsl.exe -- whoami 2^>nul`) do set "cleanCheck=%%c"
+if /i "!cleanCheck!"=="!wslUser!" (
+    echo [OK] Typing "wsl" in any cmd/PowerShell window now logs straight
+    echo      into !selectedFriendly! as "!wslUser!" - no prompts, no errors.
+) else (
+    echo [WARN] "wsl" did not come up clean as "!wslUser!" ^(got "!cleanCheck!"^).
+    echo        Check with: wsl --status  and  wsl -l -v
+)
+
+set "wslUser="
+set "wslPass="
+
+echo Creating start-wsl.bat next to this script for quick launching ...
+(
+    echo @echo off
+    echo title WSL
+    echo wsl.exe
+) > "%~dp0start-wsl.bat"
+
+echo.
+echo =========================================================
+echo   Registration complete. No username/password was written
+echo   to any file, log, or disk - only used in memory to create
+echo   the account, then cleared. Closing in 5 seconds...
+echo =========================================================
+timeout /t 5 >nul
+exit /b
+
+:ASKAGAIN
+echo.
+set /p again="Install another distribution? (y/n): "
+if /i "!again!"=="y" goto MENU
+goto END
+
+:WINEMENU
+echo.
+echo =========================================================
+echo   Install Wine
+echo =========================================================
+echo.
+echo   Looking for WSL distros already installed ...
+
+set "listfile2=%TEMP%\wsl_installed_list.txt"
+powershell -NoProfile -Command "(wsl.exe -l -q) | Out-File -FilePath '%listfile2%' -Encoding ascii" >nul 2>&1
+
+set wcount=0
+if exist "%listfile2%" (
+    for /f "usebackq tokens=* delims=" %%a in ("%listfile2%") do (
+        if not "%%a"=="" (
+            set /a wcount+=1
+            set "wdistro_!wcount!=%%a"
         )
     )
-    goto DISTROMENU
 )
 
-rem ==========================================================
-rem  Step 1: collect username / password
-rem ==========================================================
-echo Step 1: Set the username and password you'll use.
-echo (You'll enter the same ones inside your new Linux distro the first time it opens.)
-echo.
-set /p "USERNAME=Enter username: "
-set /p "PASSWORD=Enter password: "
-echo.
-echo ----------------------------
-echo Username: %USERNAME%
-echo Password: %PASSWORD%
-echo ----------------------------
-echo.
+if "%wcount%"=="0" (
+    echo.
+    echo [ERROR] No WSL distro is installed yet. Install one first ^(option 1 or 2^).
+    echo.
+    pause
+    goto MENU
+)
 
-(
-    echo Username=%USERNAME%
-    echo Password=%PASSWORD%
-) > "%CRED_FILE%"
-echo Credentials saved to "%CRED_FILE%"
-echo.
-
-rem ==========================================================
-rem  Step 2: check whether WSL is already enabled
-rem  (only elevate to Administrator if we actually need to
-rem  enable WSL - installing a distro on an already-enabled
-rem  machine does not require admin rights)
-rem ==========================================================
-echo Step 2: Checking WSL status on this machine...
-set "NEED_ENABLE=0"
-
-where wsl.exe >nul 2>&1
-if errorlevel 1 (
-    set "NEED_ENABLE=1"
+if "%wcount%"=="1" (
+    set "wineTarget=!wdistro_1!"
+    echo   Using the only distro found: !wineTarget!
 ) else (
-    wsl.exe --status >nul 2>&1
-    if errorlevel 1 set "NEED_ENABLE=1"
-)
-
-if "%NEED_ENABLE%"=="1" (
-    net session >nul 2>&1
-    if not "%errorlevel%"=="0" (
-        echo Administrator rights are needed to enable WSL on this machine.
-        echo Requesting elevation...
-        echo AFTER_ENABLE> "%STATE_FILE%"
-        reg add "%RUNONCE_KEY%" /v "%RUNONCE_NAME%" /t REG_SZ /d "\"%SCRIPT_PATH%\"" /f >nul
-        powershell -NoProfile -Command "Start-Process -FilePath '%SCRIPT_PATH%' -Verb RunAs"
-        exit /b
+    echo.
+    echo   Multiple distros found - choose one for Wine:
+    for /l %%i in (1,1,%wcount%) do (
+        echo   %%i.  !wdistro_%%i!
     )
-
-    echo WSL is not fully set up yet on this machine. Enabling it now...
-    echo ^(this installs the WSL2 kernel and required Windows features^)
     echo.
-    wsl.exe --install --no-distribution
-
-    echo.
-    echo A restart is required to finish enabling WSL.
-    echo AFTER_ENABLE> "%STATE_FILE%"
-    reg add "%RUNONCE_KEY%" /v "%RUNONCE_NAME%" /t REG_SZ /d "\"%SCRIPT_PATH%\"" /f >nul
-
-    choice /M "Restart now to continue setup automatically"
-    if errorlevel 2 (
-        echo.
-        echo OK - please restart your PC yourself when ready.
-        echo This script will continue automatically the next time you log in.
+    set "wchoice="
+    set /p wchoice="Enter a number: "
+    set "wvalid=0"
+    for /l %%i in (1,1,%wcount%) do (
+        if "!wchoice!"=="%%i" set "wvalid=1"
+    )
+    if "!wvalid!"=="0" (
+        echo [ERROR] Not a valid option.
         pause
-        exit /b
-    ) else (
-        echo Restarting in 5 seconds...
-        shutdown /r /t 5
-        exit /b
+        goto MENU
     )
-) else (
-    echo WSL is already enabled on this machine. No admin/restart needed.
+    set "wineTarget=!wdistro_%wchoice%!"
+)
+
+echo.
+echo Installing Wine into "!wineTarget!" - this runs directly as root,
+echo so there is no sudo password prompt. Output is shown live below.
+echo.
+
+wsl.exe -d "!wineTarget!" -u root -- bash -c "dpkg --add-architecture i386 && apt-get update && apt-get install -y wine wine32 wine64 winetricks"
+if not "!errorlevel!"=="0" (
     echo.
+    echo [ERROR] Wine install failed inside "!wineTarget!". See the output above for details.
+    pause
+    goto MENU
 )
 
-rem ==========================================================
-rem  Step 3: choose and install a Linux distro
-rem ==========================================================
-:DISTROMENU
-if exist "%STATE_FILE%" del "%STATE_FILE%" >nul 2>&1
-reg delete "%RUNONCE_KEY%" /v "%RUNONCE_NAME%" /f >nul 2>&1
-
-set "DISTRO1=Ubuntu"
-set "DISTRO2=Ubuntu-26.04"
-set "DISTRO3=Ubuntu-24.04"
-set "DISTRO4=Ubuntu-22.04"
-set "DISTRO5=openSUSE-Tumbleweed"
-set "DISTRO6=openSUSE-Leap-16.0"
-set "DISTRO7=SUSE-Linux-Enterprise-15-SP7"
-set "DISTRO8=SUSE-Linux-Enterprise-16.0"
-set "DISTRO9=kali-linux"
-set "DISTRO10=Debian"
-set "DISTRO11=AlmaLinux-8"
-set "DISTRO12=AlmaLinux-9"
-set "DISTRO13=AlmaLinux-Kitten-10"
-set "DISTRO14=AlmaLinux-10"
-set "DISTRO15=archlinux"
-set "DISTRO16=FedoraLinux-44"
-set "DISTRO17=FedoraLinux-43"
-set "DISTRO18=eLxr"
-set "DISTRO19=OracleLinux_7_9"
-set "DISTRO20=OracleLinux_8_10"
-set "DISTRO21=OracleLinux_9_5"
-set "DISTRO22=SUSE-Linux-Enterprise-15-SP6"
-set "DISTROCOUNT=22"
-
-echo Step 3: Choose a Linux distro to install
-echo ================================================
-for /l %%i in (1,1,%DISTROCOUNT%) do (
-    echo %%i. !DISTRO%%i!
-)
 echo.
-
-:ASKDISTRO
-set "CHOICE="
-set /p "CHOICE=Enter the number of the distro you want: "
-
-echo %CHOICE%| findstr /r "^[1-9][0-9]*$" >nul
-if errorlevel 1 (
-    echo Invalid input, please enter a number.
-    goto ASKDISTRO
-)
-if %CHOICE% GTR %DISTROCOUNT% (
-    echo Number out of range, try again.
-    goto ASKDISTRO
+echo =========================================================
+echo   Verifying Wine
+echo =========================================================
+for /f "usebackq delims=" %%v in (`wsl.exe -d "!wineTarget!" -- wine --version 2^>nul`) do set "wineVer=%%v"
+if not "!wineVer!"=="" (
+    echo [OK] Wine installed: !wineVer!
+) else (
+    echo [WARN] Could not confirm Wine version. Try manually:
+    echo        wsl -d "!wineTarget!" -- wine --version
 )
 
-call set "SELECTED=%%DISTRO%CHOICE%%%"
 echo.
-echo You chose: %SELECTED%
-echo Installing...
-echo.
+echo =========================================================
+echo   Done. Closing in 5 seconds...
+echo =========================================================
+timeout /t 5 >nul
+exit /b
 
-wsl.exe --install -d %SELECTED%
-
+:END
 echo.
-echo ================================================
-echo   Almost done!
-echo ================================================
-echo %SELECTED% will now open in its own window to finish setup.
-echo When it asks you to create a UNIX username and password, use:
-echo.
-echo   Username: %USERNAME%
-echo   Password: %PASSWORD%
-echo.
-echo (these are the same ones you entered at the start, saved in "%CRED_FILE%")
+echo =========================================================
+echo   Done.
+echo =========================================================
 echo.
 pause
