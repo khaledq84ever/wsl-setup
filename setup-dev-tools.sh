@@ -11,7 +11,7 @@ sudo apt-get install -y curl git ca-certificates gnupg build-essential
 # ---- Node.js via nvm ----
 if [ ! -d "$HOME/.nvm" ]; then
     echo "--- Installing nvm ---"
-    curl -fsSL --retry 3 --retry-delay 2 https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+    curl -fsSL --retry 3 --retry-delay 2 https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.6/install.sh | bash
 fi
 export NVM_DIR="$HOME/.nvm"
 # shellcheck disable=SC1091
