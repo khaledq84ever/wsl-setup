@@ -86,6 +86,12 @@ if "!wslUser!"=="" (
     pause
     goto MENU
 )
+if /i "!wslUser!"=="root" (
+    echo [ERROR] "root" already exists in every distro - pick a different,
+    echo         new username so a real account actually gets created.
+    pause
+    goto MENU
+)
 
 for /f "usebackq delims=" %%p in (`powershell -NoProfile -Command "$s = Read-Host -AsSecureString '  New Linux password'; $b = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($s); [Runtime.InteropServices.Marshal]::PtrToStringAuto($b)"`) do set "wslPass=%%p"
 
@@ -96,38 +102,58 @@ if "!wslPass!"=="" (
 )
 
 echo.
-echo Installing !selectedFriendly! ...
-echo ^(--web-download is used to avoid a known WSL bug where install
-echo   can hang at 0.0%% - see Microsoft's WSL install docs^)
-wsl.exe --install -d "!selectedName!" --no-launch --web-download
-if not "!errorlevel!"=="0" (
-    echo [ERROR] wsl.exe --install failed for "!selectedName!".
-    echo         If this is the very first WSL install on this PC, Windows
-    echo         may need a restart to finish enabling WSL. Restart, then
-    echo         run this tool again.
-    set "wslPass="
-    pause
-    goto MENU
+echo Checking whether !selectedFriendly! is already installed ...
+set "listfile3=%TEMP%\wsl_precheck_list.txt"
+powershell -NoProfile -Command "(wsl.exe -l -q) | Out-File -FilePath '%listfile3%' -Encoding ascii" >nul 2>&1
+set "alreadyInstalled=0"
+if exist "%listfile3%" (
+    for /f "usebackq tokens=* delims=" %%a in ("%listfile3%") do (
+        if /i "%%a"=="!selectedName!" set "alreadyInstalled=1"
+    )
+)
+
+if "!alreadyInstalled!"=="1" (
+    echo !selectedFriendly! is already installed - skipping install,
+    echo continuing straight to account setup.
+) else (
+    echo Installing !selectedFriendly! ...
+    echo ^(--web-download is used to avoid a known WSL bug where install
+    echo   can hang at 0.0%% - see Microsoft's WSL install docs^)
+    wsl.exe --install -d "!selectedName!" --no-launch --web-download
+    if not "!errorlevel!"=="0" (
+        echo [ERROR] wsl.exe --install failed for "!selectedName!".
+        echo         If this is the very first WSL install on this PC, Windows
+        echo         may need a restart to finish enabling WSL. Restart, then
+        echo         run this tool again.
+        set "wslPass="
+        pause
+        goto MENU
+    )
 )
 
 echo.
 echo Waiting for !selectedFriendly! to finish initializing ...
+echo ^(a first-ever WSL launch on this PC can take several minutes -
+echo   it is extracting and booting the distro for the first time^)
 set /a tries=0
 :WAITLOOP
 wsl.exe -d "!selectedName!" -u root -- true >nul 2>&1
 if "!errorlevel!"=="0" goto READY
 set /a tries+=1
-if !tries! GEQ 20 (
-    echo [ERROR] !selectedFriendly! did not become ready in time.
-    echo         This usually means Windows needs a restart to finish
-    echo         enabling WSL for the first time. Restart your PC, then
-    echo         run this tool again and pick the same option -
-    echo         it will pick up where it left off.
+set /a elapsed=tries*5
+set /a remainder=tries %% 6
+if "!remainder!"=="0" echo   ... still waiting ^(!elapsed! seconds so far^), this is normal on a first install
+if !tries! GEQ 60 (
+    echo [ERROR] !selectedFriendly! did not become ready after 5 minutes.
+    echo         Try launching it manually first: wsl -d !selectedName!
+    echo         If that also hangs, Windows may need a restart to finish
+    echo         enabling WSL. Restart your PC, then run this tool again
+    echo         and pick the same option - it will pick up where it left off.
     set "wslPass="
     pause
     goto MENU
 )
-timeout /t 3 >nul
+timeout /t 5 >nul
 goto WAITLOOP
 
 :READY
