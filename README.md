@@ -18,6 +18,48 @@ wsl-setup.bat [distro] [username]
 
 Defaults to `Ubuntu` / `khaled` if no arguments are given.
 
+## CLI reference
+
+Run from `cmd.exe` or PowerShell, from inside the cloned repo folder. All fully non-interactive except the two masked prompts described above.
+
+```bat
+:: default: Ubuntu + user "khaled"
+wsl-setup.bat
+
+:: explicit distro + username
+wsl-setup.bat Ubuntu khaled
+wsl-setup.bat Debian khaled
+
+:: check what distro names are available on your machine first
+wsl --list --online
+```
+
+Clone + run in one go (PowerShell, as admin):
+
+```powershell
+git clone https://github.com/khaledq84ever/wsl-setup.git
+cd wsl-setup
+.\wsl-setup.bat
+```
+
+Re-running is safe and idempotent — it skips any step already done (existing distro, existing user, existing dev tools, existing `gh` auth) and just fills in whatever's missing.
+
+To run only the dev-tools half (nvm/Node, Docker, `gh`) inside a WSL distro you already have set up, skip `wsl-setup.bat` entirely and run `setup-dev-tools.sh` directly from a WSL shell:
+
+```bash
+bash setup-dev-tools.sh
+```
+
+## Lightweight distro option
+
+`Debian` is a lighter alternative to `Ubuntu` for WSL — same `apt` package manager, same commands, smaller base image, and it's Ubuntu's own upstream base. `setup-dev-tools.sh` is apt-based and distro-agnostic, so it runs unmodified on Debian too:
+
+```bat
+wsl-setup.bat Debian khaled
+```
+
+Confirm the exact Store name first with `wsl --list --online`.
+
 ## What it does
 
 `wsl-setup.bat`:
