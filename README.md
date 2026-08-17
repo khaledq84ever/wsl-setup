@@ -1,6 +1,6 @@
 # wsl-setup
 
-![wsl-setup](assets/banner-1-terminal.svg)
+![wsl-setup](assets/banner.svg)
 
 One-shot, fully automated WSL + dev tools installer for a Windows PC. Run one `.bat` file as admin and end up with Ubuntu-on-WSL2, a non-root user with passwordless sudo, Node.js (via nvm), Docker, and GitHub CLI already authenticated.
 
