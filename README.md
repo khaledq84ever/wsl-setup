@@ -2,83 +2,34 @@
 
 ![wsl-setup](assets/banner.svg)
 
-One-shot, fully automated WSL + dev tools installer for a Windows PC. Run one `.bat` file as admin and end up with Ubuntu-on-WSL2, a non-root user with passwordless sudo, Node.js (via nvm), Docker, and GitHub CLI already authenticated.
+Interactive, guided WSL setup wizard for a Windows PC. Run one `.bat` file and it walks you through: entering a username/password, enabling WSL on the machine if it isn't already (with an auto-resume after the required reboot), and picking a Linux distro from a numbered menu to install.
 
 ## Usage
 
 1. Clone or download this repo onto your Windows machine.
-2. Run `wsl-setup.bat` (right-click → Run as administrator, or just double-click — it self-elevates).
-3. You'll be prompted twice, both masked and both stay entirely on your machine:
-   - A password for the new WSL Linux user (default username `khaled`).
-   - A GitHub Personal Access Token (create one first at https://github.com/settings/tokens/new with `repo`, `workflow`, `read:org` scopes — or leave it blank to skip).
+2. Run `wsl-setup.bat` (just double-click it, or run from `cmd.exe`).
+3. Enter a username and password when prompted. **These are shown on screen in plain text as you type and saved in plain text to `credentials.txt` next to the script** — this is intentional for this interactive variant, not a bug. Don't reuse a real/sensitive password here.
+4. If WSL isn't enabled yet on this machine, the script requests admin rights, enables it, and offers to restart. If you restart, it automatically continues where it left off after you log back in (via a one-time registry `RunOnce` entry) — no need to re-run it yourself.
+5. Pick a distro from the numbered menu (1–22, e.g. `1` for Ubuntu, `10` for Debian) and it installs it via `wsl --install -d <name>`.
+6. When the new distro opens for the first time to create its own Linux user, use the same username/password you entered in step 3.
 
-That's it. No other prompts.
+If WSL is already enabled on the machine (the common case), no admin elevation or reboot happens at all — it goes straight from credentials to the distro menu.
 
-```
-wsl-setup.bat [distro] [username]
-```
+## What it does
 
-Defaults to `Ubuntu` / `khaled` if no arguments are given.
+`wsl-setup.bat`:
+- Prompts for a username/password (plain text, saved locally to `credentials.txt`).
+- Checks `wsl --status`; only elevates to Administrator and enables WSL2 + required Windows features if it isn't already set up.
+- If a reboot is required, sets a `RunOnce` registry entry so the script auto-resumes after login instead of needing to be re-run manually.
+- Shows a numbered menu of every distro currently available via `wsl --list --online` and installs the one you pick.
 
-## CLI reference
-
-Run from `cmd.exe` or PowerShell, from inside the cloned repo folder. All fully non-interactive except the two masked prompts described above.
-
-```bat
-:: default: Ubuntu + user "khaled"
-wsl-setup.bat
-
-:: explicit distro + username
-wsl-setup.bat Ubuntu khaled
-wsl-setup.bat Debian khaled
-
-:: check what distro names are available on your machine first
-wsl --list --online
-```
-
-Clone + run in one go (PowerShell, as admin):
-
-```powershell
-git clone https://github.com/khaledq84ever/wsl-setup.git
-cd wsl-setup
-.\wsl-setup.bat
-```
-
-Re-running is safe and idempotent — it skips any step already done (existing distro, existing user, existing dev tools, existing `gh` auth) and just fills in whatever's missing.
-
-To run only the dev-tools half (nvm/Node, Docker, `gh`) inside a WSL distro you already have set up, skip `wsl-setup.bat` entirely and run `setup-dev-tools.sh` directly from a WSL shell:
+`setup-dev-tools.sh` (nvm/Node, Docker, GitHub CLI — run separately inside a WSL distro, no longer auto-chained by `wsl-setup.bat`):
 
 ```bash
 bash setup-dev-tools.sh
 ```
 
-## Lightweight distro option
-
-`Debian` is a lighter alternative to `Ubuntu` for WSL — same `apt` package manager, same commands, smaller base image, and it's Ubuntu's own upstream base. `setup-dev-tools.sh` is apt-based and distro-agnostic, so it runs unmodified on Debian too:
-
-```bat
-wsl-setup.bat Debian khaled
-```
-
-Confirm the exact Store name first with `wsl --list --online`.
-
-## What it does
-
-`wsl-setup.bat`:
-- Installs WSL2 + Ubuntu headlessly (`wsl --install --no-launch`, no OOBE console).
-- If the machine needs WSL/Virtualization features enabled first, enables them and auto-reboots (10s warning) — re-run the script after reboot to finish.
-- Creates the Linux user non-interactively, grants passwordless `sudo`, sets it as the WSL default user.
-- Runs `setup-dev-tools.sh` inside WSL.
-- Authenticates `gh` non-interactively via the token you enter (`gh auth login --with-token` + `gh auth setup-git`, so plain `git push`/`clone` over HTTPS also just works).
-- Safe to re-run: skips any step that's already done (existing user, existing installs, existing `gh` auth).
-
-`setup-dev-tools.sh` (runs inside WSL):
-- nvm + Node.js LTS
-- Docker Engine (via `get.docker.com`), plus enables `systemd` in `/etc/wsl.conf` so `dockerd` persists across shells
-- GitHub CLI (`gh`)
-
 ## Notes
 
-- The password/token never pass through any AI chat or log — they're entered locally via a masked PowerShell prompt at run time and forwarded into WSL only via `WSLENV` (env-var forwarding), never as command-line arguments.
-- After the dev-tools step, WSL restarts once more to activate systemd. If you re-run the script later, that restart happens again — harmless, just closes and reopens your WSL session.
-- Tested end-to-end (not just read-through): the WSL-side install steps in a real Ubuntu Docker container as a non-root sudo user, and the batch script's full control flow (fresh install, idempotent re-run, reboot-needed fallback) via Wine's `cmd.exe` with stubbed Windows commands.
+- Password is intentionally shown and stored in plain text (`credentials.txt`) by design for this interactive flow — delete that file when you're done if you don't want it lingering.
+- `credentials.txt` and `wsl_setup_state.txt` are working files the script creates next to itself; safe to delete once setup is finished.

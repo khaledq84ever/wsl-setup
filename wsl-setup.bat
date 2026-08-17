@@ -1,118 +1,185 @@
 @echo off
-setlocal enabledelayedexpansion
+setlocal EnableDelayedExpansion
+title WSL Full Setup Wizard
 
-:: ---- self-elevate to admin ----
-net session >nul 2>&1
-if %errorlevel% neq 0 (
-    echo Requesting administrator privileges...
-    powershell -Command "Start-Process '%~f0' -Verb RunAs"
-    exit /b
+set "SCRIPT_PATH=%~f0"
+set "CRED_FILE=%~dp0credentials.txt"
+set "STATE_FILE=%~dp0wsl_setup_state.txt"
+set "RUNONCE_KEY=HKCU\Software\Microsoft\Windows\CurrentVersion\RunOnce"
+set "RUNONCE_NAME=WSLFullSetup"
+
+echo ================================================
+echo   WSL Full Setup Wizard
+echo ================================================
+echo.
+
+rem ==========================================================
+rem  Figure out if we're resuming after a reboot
+rem ==========================================================
+set "RESUME_STAGE=START"
+if exist "%STATE_FILE%" (
+    set /p RESUME_STAGE=<"%STATE_FILE%"
 )
 
-set "DISTRO=%~1"
-if "%DISTRO%"=="" set "DISTRO=Ubuntu"
-set "WSLUSER=%~2"
-if "%WSLUSER%"=="" set "WSLUSER=khaled"
-
-echo ============================================
-echo  WSL Auto Setup
-echo  Distro:   %DISTRO%
-echo  Username: %WSLUSER%
-echo ============================================
-
-:: keep the WSL launcher itself current so flags like --no-launch behave
-wsl --update >nul 2>&1
-
-:: ---- ensure distro is registered ----
-wsl -d %DISTRO% -- true >nul 2>&1
-if %errorlevel% neq 0 (
-    echo Installing %DISTRO% ^(no OOBE prompt^)...
-    wsl --install -d %DISTRO% --no-launch
-    wsl -d %DISTRO% -- true >nul 2>&1
-    if !errorlevel! neq 0 (
-        echo.
-        echo WSL/virtualization features aren't ready yet - enabling them now.
-        dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart
-        dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart
-        echo.
-        echo A REBOOT is required - rebooting automatically in 10 seconds.
-        echo Save any open work now. Re-run this script after reboot to finish.
-        shutdown /r /t 10
-        goto :end
-    )
-)
-
-:: ---- create user if missing (fully non-interactive) ----
-wsl -d %DISTRO% -u root -- id -u %WSLUSER% >nul 2>&1
-if %errorlevel% neq 0 (
+if /i "!RESUME_STAGE!"=="AFTER_ENABLE" (
+    echo Resuming setup after restart...
     echo.
-    echo Creating Linux user "%WSLUSER%"...
-    for /f "usebackq delims=" %%P in (`powershell -NoProfile -Command "$s=Read-Host -AsSecureString 'Password for %WSLUSER% in WSL'; [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($s))"`) do set "WSLPASS=%%P"
-    if "!WSLPASS!"=="" (
-        echo No password entered - aborting.
-        goto :end
+    if exist "%CRED_FILE%" (
+        for /f "usebackq tokens=1,2 delims==" %%A in ("%CRED_FILE%") do (
+            if /i "%%A"=="Username" set "USERNAME=%%B"
+            if /i "%%A"=="Password" set "PASSWORD=%%B"
+        )
     )
-    set "WSLENV=WSLPASS"
+    goto DISTROMENU
+)
 
-    wsl -d %DISTRO% -u root -- bash -c "useradd -m -s /bin/bash -G sudo %WSLUSER%"
-    wsl -d %DISTRO% -u root -- bash -c "echo \"%WSLUSER%:$WSLPASS\" | chpasswd"
-    set "WSLPASS="
+rem ==========================================================
+rem  Step 1: collect username / password
+rem ==========================================================
+echo Step 1: Set the username and password you'll use.
+echo (You'll enter the same ones inside your new Linux distro the first time it opens.)
+echo.
+set /p "USERNAME=Enter username: "
+set /p "PASSWORD=Enter password: "
+echo.
+echo ----------------------------
+echo Username: %USERNAME%
+echo Password: %PASSWORD%
+echo ----------------------------
+echo.
+
+(
+    echo Username=%USERNAME%
+    echo Password=%PASSWORD%
+) > "%CRED_FILE%"
+echo Credentials saved to "%CRED_FILE%"
+echo.
+
+rem ==========================================================
+rem  Step 2: check whether WSL is already enabled
+rem  (only elevate to Administrator if we actually need to
+rem  enable WSL - installing a distro on an already-enabled
+rem  machine does not require admin rights)
+rem ==========================================================
+echo Step 2: Checking WSL status on this machine...
+set "NEED_ENABLE=0"
+
+where wsl.exe >nul 2>&1
+if errorlevel 1 (
+    set "NEED_ENABLE=1"
 ) else (
-    echo User %WSLUSER% already exists.
+    wsl.exe --status >nul 2>&1
+    if errorlevel 1 set "NEED_ENABLE=1"
 )
 
-:: always ensure passwordless sudo (idempotent, covers pre-existing users too)
-wsl -d %DISTRO% -u root -- bash -c "echo '%WSLUSER% ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/%WSLUSER% && chmod 440 /etc/sudoers.d/%WSLUSER%"
-
-:: only touch wsl.conf / restart if %WSLUSER% isn't already the configured default
-wsl -d %DISTRO% -u root -- bash -c "grep -q '^default=%WSLUSER%$' /etc/wsl.conf 2>/dev/null"
-if %errorlevel% neq 0 (
-    wsl -d %DISTRO% -u root -- bash -c "sed -i '/^\[user\]/,+1d' /etc/wsl.conf 2>/dev/null; printf '[user]\ndefault=%WSLUSER%\n\n' >> /etc/wsl.conf"
-    echo Restarting %DISTRO% to apply default user...
-    wsl --terminate %DISTRO%
-)
-
-:: ---- run dev tools setup (nvm/Node, Docker, gh) - no prompts, passwordless sudo ----
-set "SH=%~dp0setup-dev-tools.sh"
-if not exist "%SH%" (
-    echo setup-dev-tools.sh not found next to this script - skipping dev tools.
-    goto :end
-)
-echo.
-echo Running dev tools setup inside %DISTRO% ^(nvm/Node, Docker, gh^)...
-wsl -d %DISTRO% -- bash -c "bash \"$(wslpath '%SH%')\""
-
-echo.
-echo Restarting WSL once more to activate systemd for Docker...
-wsl --shutdown
-timeout /t 3 /nobreak >nul
-
-:: systemd is only active from this restart onward - enable/start docker now that it's up
-wsl -d %DISTRO% -- bash -c "sudo systemctl enable --now docker 2>/dev/null || true"
-
-wsl -d %DISTRO% -- bash -c "whoami; export NVM_DIR=\"$HOME/.nvm\"; [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\"; node -v; docker --version; systemctl is-active docker 2>/dev/null; gh --version"
-
-:: ---- GitHub auth (non-interactive, via Personal Access Token) ----
-wsl -d %DISTRO% -- bash -c "gh auth status" >nul 2>&1
-if %errorlevel% neq 0 (
-    echo.
-    echo GitHub CLI isn't authenticated yet.
-    echo Create a token first ^(if you don't have one^): https://github.com/settings/tokens/new
-    echo   Recommended scopes: repo, workflow, read:org
-    echo.
-    for /f "usebackq delims=" %%T in (`powershell -NoProfile -Command "$s=Read-Host -AsSecureString 'GitHub Personal Access Token (leave empty to skip)'; [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($s))"`) do set "GHTOKEN=%%T"
-
-    if not "!GHTOKEN!"=="" (
-        set "WSLENV=GHTOKEN"
-        wsl -d %DISTRO% -- bash -c "echo \"$GHTOKEN\" | gh auth login --hostname github.com --git-protocol https --with-token"
-        wsl -d %DISTRO% -- bash -c "gh auth setup-git"
-        set "GHTOKEN="
-        wsl -d %DISTRO% -- bash -c "gh auth status"
-    ) else (
-        echo Skipped - run 'gh auth login' manually inside WSL later.
+if "%NEED_ENABLE%"=="1" (
+    net session >nul 2>&1
+    if not "%errorlevel%"=="0" (
+        echo Administrator rights are needed to enable WSL on this machine.
+        echo Requesting elevation...
+        echo AFTER_ENABLE> "%STATE_FILE%"
+        reg add "%RUNONCE_KEY%" /v "%RUNONCE_NAME%" /t REG_SZ /d "\"%SCRIPT_PATH%\"" /f >nul
+        powershell -NoProfile -Command "Start-Process -FilePath '%SCRIPT_PATH%' -Verb RunAs"
+        exit /b
     )
+
+    echo WSL is not fully set up yet on this machine. Enabling it now...
+    echo ^(this installs the WSL2 kernel and required Windows features^)
+    echo.
+    wsl.exe --install --no-distribution
+
+    echo.
+    echo A restart is required to finish enabling WSL.
+    echo AFTER_ENABLE> "%STATE_FILE%"
+    reg add "%RUNONCE_KEY%" /v "%RUNONCE_NAME%" /t REG_SZ /d "\"%SCRIPT_PATH%\"" /f >nul
+
+    choice /M "Restart now to continue setup automatically"
+    if errorlevel 2 (
+        echo.
+        echo OK - please restart your PC yourself when ready.
+        echo This script will continue automatically the next time you log in.
+        pause
+        exit /b
+    ) else (
+        echo Restarting in 5 seconds...
+        shutdown /r /t 5
+        exit /b
+    )
+) else (
+    echo WSL is already enabled on this machine. No admin/restart needed.
+    echo.
 )
 
-:end
+rem ==========================================================
+rem  Step 3: choose and install a Linux distro
+rem ==========================================================
+:DISTROMENU
+if exist "%STATE_FILE%" del "%STATE_FILE%" >nul 2>&1
+reg delete "%RUNONCE_KEY%" /v "%RUNONCE_NAME%" /f >nul 2>&1
+
+set "DISTRO1=Ubuntu"
+set "DISTRO2=Ubuntu-26.04"
+set "DISTRO3=Ubuntu-24.04"
+set "DISTRO4=Ubuntu-22.04"
+set "DISTRO5=openSUSE-Tumbleweed"
+set "DISTRO6=openSUSE-Leap-16.0"
+set "DISTRO7=SUSE-Linux-Enterprise-15-SP7"
+set "DISTRO8=SUSE-Linux-Enterprise-16.0"
+set "DISTRO9=kali-linux"
+set "DISTRO10=Debian"
+set "DISTRO11=AlmaLinux-8"
+set "DISTRO12=AlmaLinux-9"
+set "DISTRO13=AlmaLinux-Kitten-10"
+set "DISTRO14=AlmaLinux-10"
+set "DISTRO15=archlinux"
+set "DISTRO16=FedoraLinux-44"
+set "DISTRO17=FedoraLinux-43"
+set "DISTRO18=eLxr"
+set "DISTRO19=OracleLinux_7_9"
+set "DISTRO20=OracleLinux_8_10"
+set "DISTRO21=OracleLinux_9_5"
+set "DISTRO22=SUSE-Linux-Enterprise-15-SP6"
+set "DISTROCOUNT=22"
+
+echo Step 3: Choose a Linux distro to install
+echo ================================================
+for /l %%i in (1,1,%DISTROCOUNT%) do (
+    echo %%i. !DISTRO%%i!
+)
 echo.
-echo Setup finished.
+
+:ASKDISTRO
+set "CHOICE="
+set /p "CHOICE=Enter the number of the distro you want: "
+
+echo %CHOICE%| findstr /r "^[1-9][0-9]*$" >nul
+if errorlevel 1 (
+    echo Invalid input, please enter a number.
+    goto ASKDISTRO
+)
+if %CHOICE% GTR %DISTROCOUNT% (
+    echo Number out of range, try again.
+    goto ASKDISTRO
+)
+
+call set "SELECTED=%%DISTRO%CHOICE%%%"
+echo.
+echo You chose: %SELECTED%
+echo Installing...
+echo.
+
+wsl.exe --install -d %SELECTED%
+
+echo.
+echo ================================================
+echo   Almost done!
+echo ================================================
+echo %SELECTED% will now open in its own window to finish setup.
+echo When it asks you to create a UNIX username and password, use:
+echo.
+echo   Username: %USERNAME%
+echo   Password: %PASSWORD%
+echo.
+echo (these are the same ones you entered at the start, saved in "%CRED_FILE%")
+echo.
+pause
