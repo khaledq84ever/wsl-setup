@@ -4,6 +4,8 @@
 
 Fully automatic WSL setup for a Windows PC. Run one `.bat` file, pick any distro from a live numbered menu, and it does the rest — no interactive WSL setup wizard, no typing anything except a username/password once.
 
+![WSL AUTO SETUP menu](assets/menu.svg)
+
 ## Usage
 
 1. Clone or download this repo onto your Windows machine.
