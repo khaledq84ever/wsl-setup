@@ -48,7 +48,6 @@ echo   just restart and run it again; it will continue safely.
 echo.
 echo   1.  Ubuntu   (Ubuntu, latest LTS - full-featured, larger)
 echo   2.  Debian   (Debian GNU/Linux - small and lightweight)
-echo   3.  Wine     (install Wine into a distro you already have)
 echo   0.  Exit
 echo.
 
@@ -66,7 +65,6 @@ if "%choice%"=="2" (
     set "selectedFriendly=Debian GNU/Linux"
     goto GOTCHOICE
 )
-if "%choice%"=="3" goto WINEMENU
 
 echo.
 echo [ERROR] "%choice%" is not a valid option.
@@ -307,104 +305,6 @@ echo.
 set /p again="Install another distribution? (y/n): "
 if /i "!again!"=="y" goto MENU
 goto END
-
-:WINEMENU
-echo.
-echo =========================================================
-echo   Install Wine
-echo =========================================================
-echo.
-echo   Looking for WSL distros already installed ...
-
-set wcount=0
-for /f "usebackq delims=" %%a in (`wsl.exe -l -q`) do (
-    if not "%%a"=="" (
-        set /a wcount+=1
-        set "wdistro_!wcount!=%%a"
-    )
-)
-
-if "%wcount%"=="0" (
-    echo.
-    echo [ERROR] No WSL distro is installed yet. Install one first ^(option 1 or 2^).
-    echo.
-    pause
-    goto MENU
-)
-
-if "%wcount%"=="1" (
-    set "wineTarget=!wdistro_1!"
-    echo   Using the only distro found: !wineTarget!
-) else (
-    echo.
-    echo   Multiple distros found - choose one for Wine:
-    for /l %%i in (1,1,%wcount%) do (
-        echo   %%i.  !wdistro_%%i!
-    )
-    echo.
-    set "wchoice="
-    set /p wchoice="Enter a number: "
-    set "wvalid=0"
-    for /l %%i in (1,1,%wcount%) do (
-        if "!wchoice!"=="%%i" set "wvalid=1"
-    )
-    if "!wvalid!"=="0" (
-        echo [ERROR] Not a valid option.
-        pause
-        goto MENU
-    )
-    set "wineTarget=!wdistro_%wchoice%!"
-)
-
-echo.
-echo Installing Wine into "!wineTarget!" - this runs directly as root,
-echo so there is no sudo password prompt. Output is shown live below.
-echo.
-
-REM  same reason as the user-creation step: cmd.exe treats && inside a
-REM  quoted bash -c string as ITS OWN operator, splitting the command
-REM  before it ever reaches bash. Use a generated script file instead.
-set "wineScript=%TEMP%\wsl_setup_install_wine.sh"
-(
-echo #^^!/bin/bash
-echo set -e
-echo dpkg --add-architecture i386
-echo apt-get update
-echo apt-get install -y wine wine32 wine64
-echo apt-get install -y winetricks ^|^| echo "[WARN] winetricks package unavailable on this distro/release - Wine itself installed fine, skipping winetricks."
-) > "%wineScript%"
-
-for /f "usebackq delims=" %%P in (`wsl.exe -d !wineTarget! -- wslpath -a "%wineScript%"`) do set "WINESCRIPTWSL=%%P"
-wsl.exe -d !wineTarget! -u root -- sed -i "s/\r$//" "%WINESCRIPTWSL%"
-wsl.exe -d !wineTarget! -u root -- bash "%WINESCRIPTWSL%"
-set "wineScriptResult=!errorlevel!"
-del "%wineScript%" >nul 2>&1
-
-if not "!wineScriptResult!"=="0" (
-    echo.
-    echo [ERROR] Wine install failed inside "!wineTarget!". See the output above for details.
-    pause
-    goto MENU
-)
-
-echo.
-echo =========================================================
-echo   Verifying Wine
-echo =========================================================
-for /f "usebackq delims=" %%v in (`wsl.exe -d !wineTarget! -- wine --version 2^>nul`) do set "wineVer=%%v"
-if not "!wineVer!"=="" (
-    echo [OK] Wine installed: !wineVer!
-) else (
-    echo [WARN] Could not confirm Wine version. Try manually:
-    echo        wsl -d !wineTarget! -- wine --version
-)
-
-echo.
-echo =========================================================
-echo   Done. Closing in 5 seconds...
-echo =========================================================
-timeout /t 5 >nul
-exit /b
 
 :END
 echo.
