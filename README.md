@@ -2,15 +2,13 @@
 
 ![wsl-setup](assets/banner.svg)
 
-Fully automatic WSL setup for a Windows PC. Run one `.bat` file, pick a distro from a 2-item menu, and it does the rest — no interactive WSL setup wizard, no typing anything except a username/password once.
+Fully automatic WSL setup for a Windows PC. Run one `.bat` file, pick any distro from a live numbered menu, and it does the rest — no interactive WSL setup wizard, no typing anything except a username/password once.
 
 ## Usage
 
 1. Clone or download this repo onto your Windows machine.
 2. Run `wsl-setup.bat` (double-click it, or run from `cmd.exe`). It self-elevates to Administrator via UAC.
-3. Pick an option:
-   - `1` Ubuntu (latest LTS)
-   - `2` Debian (lighter/smaller than Ubuntu)
+3. Pick a distro from the numbered menu — built live from `wsl.exe --list --online`, so it's whatever Microsoft currently offers (Ubuntu, Debian, Fedora, Arch, openSUSE, Kali, AlmaLinux, Oracle Linux, and more), never a hardcoded list that goes stale.
 4. Enter a new Linux username and password when prompted (password input is masked).
 5. The script installs the distro (`wsl --install -d <name> --no-launch --web-download`), waits for it to become ready, then creates the Linux user itself — `useradd`, `chpasswd`, adds to `sudo`, and grants **passwordless sudo** (`/etc/sudoers.d/<user>`) so system commands run without a prompt.
 6. It sets that user as the distro's default user, sets the distro as the **machine's** default (`wsl --set-default`), and verifies that typing plain `wsl` in any terminal drops straight into that user with no prompts.
