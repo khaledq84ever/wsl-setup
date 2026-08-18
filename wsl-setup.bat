@@ -57,8 +57,36 @@ echo   First time installing WSL on this PC? A restart may be
 echo   needed partway through - if this tool stops and says so,
 echo   just restart and run it again; it will continue safely.
 echo.
-echo   1.  Ubuntu   (Ubuntu, latest LTS - full-featured, larger)
-echo   2.  Debian   (Debian GNU/Linux - small and lightweight)
+echo   Fetching the list of available distros ...
+
+set "DISTROCOUNT=0"
+for /f "skip=4 tokens=1,*" %%D in ('wsl.exe --list --online') do (
+    if not "%%D"=="" (
+        set /a DISTROCOUNT+=1
+        set "DISTRONAME_!DISTROCOUNT!=%%D"
+        set "DISTROFRIENDLY_!DISTROCOUNT!=%%E"
+    )
+)
+
+if "!DISTROCOUNT!"=="0" (
+    echo.
+    echo %CLR_RED%[ERROR]%CLR_RESET% Could not read the distro list from 'wsl.exe --list --online'.
+    echo         Check your internet connection and try again.
+    echo.
+    pause
+    goto END
+)
+
+cls
+echo %CLR_CYAN%=========================================================%CLR_RESET%
+echo                 %CLR_BOLD%%CLR_CYAN%WSL AUTO SETUP%CLR_RESET%
+echo %CLR_CYAN%=========================================================%CLR_RESET%
+echo.
+echo   Choose a distro to install:
+echo.
+for /l %%i in (1,1,!DISTROCOUNT!) do (
+    echo   %%i.  !DISTROFRIENDLY_%%i!
+)
 echo   0.  Exit
 echo.
 
@@ -66,22 +94,26 @@ set "choice="
 set /p choice="Choose an option: "
 
 if "%choice%"=="0" goto END
-if "%choice%"=="1" (
-    set "selectedName=Ubuntu"
-    set "selectedFriendly=Ubuntu (latest LTS)"
-    goto GOTCHOICE
+
+echo %choice%| findstr /r "^[1-9][0-9]*$" >nul
+if errorlevel 1 (
+    echo.
+    echo %CLR_RED%[ERROR]%CLR_RESET% "%choice%" is not a valid option.
+    echo.
+    pause
+    goto MENU
 )
-if "%choice%"=="2" (
-    set "selectedName=Debian"
-    set "selectedFriendly=Debian GNU/Linux"
-    goto GOTCHOICE
+if %choice% GTR %DISTROCOUNT% (
+    echo.
+    echo %CLR_RED%[ERROR]%CLR_RESET% "%choice%" is not a valid option.
+    echo.
+    pause
+    goto MENU
 )
 
-echo.
-echo %CLR_RED%[ERROR]%CLR_RESET% "%choice%" is not a valid option.
-echo.
-pause
-goto MENU
+call set "selectedName=%%DISTRONAME_%choice%%%"
+call set "selectedFriendly=%%DISTROFRIENDLY_%choice%%%"
+goto GOTCHOICE
 
 :GOTCHOICE
 echo.
