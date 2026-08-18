@@ -12,6 +12,17 @@ REM is piped/redirected (which it always is under `for /f`) - without this,
 REM parsing wsl.exe output in batch silently returns garbage.
 set "WSL_UTF8=1"
 
+REM --- ANSI colors (modern Windows Terminal / conhost both support this
+REM     natively - no registry tweak needed on Win10 1909+/Win11). Falls
+REM     back to harmless raw escape-looking text on truly ancient consoles.
+for /f %%E in ('echo prompt $E^|cmd') do set "ESC=%%E"
+set "CLR_RESET=%ESC%[0m"
+set "CLR_CYAN=%ESC%[96m"
+set "CLR_GREEN=%ESC%[92m"
+set "CLR_YELLOW=%ESC%[93m"
+set "CLR_RED=%ESC%[91m"
+set "CLR_BOLD=%ESC%[1m"
+
 REM --- Self-elevate to Administrator ---
 net session >nul 2>&1
 if not "%errorlevel%"=="0" (
@@ -24,9 +35,9 @@ REM --- Check Windows version supports WSL (needs Win10 build 19041+ or Win11) -
 for /f "usebackq delims=" %%b in (`powershell -NoProfile -Command "[System.Environment]::OSVersion.Version.Build"`) do set "winBuild=%%b"
 if !winBuild! LSS 19041 (
     cls
-    echo =========================================================
-    echo   [ERROR] Windows build !winBuild! is too old for WSL.
-    echo =========================================================
+    echo %CLR_CYAN%=========================================================%CLR_RESET%
+    echo   %CLR_RED%[ERROR]%CLR_RESET% Windows build !winBuild! is too old for WSL.
+    echo %CLR_CYAN%=========================================================%CLR_RESET%
     echo.
     echo   WSL needs Windows 10 build 19041 or higher, or Windows 11.
     echo   Update Windows first, then run this tool again. See:
@@ -38,9 +49,9 @@ if !winBuild! LSS 19041 (
 
 :MENU
 cls
-echo =========================================================
-echo                 WSL AUTO SETUP
-echo =========================================================
+echo %CLR_CYAN%=========================================================%CLR_RESET%
+echo                 %CLR_BOLD%%CLR_CYAN%WSL AUTO SETUP%CLR_RESET%
+echo %CLR_CYAN%=========================================================%CLR_RESET%
 echo.
 echo   First time installing WSL on this PC? A restart may be
 echo   needed partway through - if this tool stops and says so,
@@ -67,16 +78,16 @@ if "%choice%"=="2" (
 )
 
 echo.
-echo [ERROR] "%choice%" is not a valid option.
+echo %CLR_RED%[ERROR]%CLR_RESET% "%choice%" is not a valid option.
 echo.
 pause
 goto MENU
 
 :GOTCHOICE
 echo.
-echo =========================================================
+echo %CLR_CYAN%=========================================================%CLR_RESET%
 echo   Selected: !selectedFriendly!   [wsl.exe --install -d !selectedName!]
-echo =========================================================
+echo %CLR_CYAN%=========================================================%CLR_RESET%
 echo.
 echo   Set up the Linux account now - it will be created
 echo   automatically, no need to type anything during install.
@@ -85,12 +96,12 @@ echo.
 set "wslUser="
 set /p wslUser="  New Linux username: "
 if "!wslUser!"=="" (
-    echo [ERROR] Username cannot be empty.
+    echo %CLR_RED%[ERROR]%CLR_RESET% Username cannot be empty.
     pause
     goto MENU
 )
 if /i "!wslUser!"=="root" (
-    echo [ERROR] "root" already exists in every distro - pick a different,
+    echo %CLR_RED%[ERROR]%CLR_RESET% "root" already exists in every distro - pick a different,
     echo         new username so a real account actually gets created.
     pause
     goto MENU
@@ -99,7 +110,7 @@ if /i "!wslUser!"=="root" (
 for /f "usebackq delims=" %%p in (`powershell -NoProfile -Command "$s = Read-Host -AsSecureString '  New Linux password'; $b = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($s); [Runtime.InteropServices.Marshal]::PtrToStringAuto($b)"`) do set "wslPass=%%p"
 
 if "!wslPass!"=="" (
-    echo [ERROR] Password cannot be empty.
+    echo %CLR_RED%[ERROR]%CLR_RESET% Password cannot be empty.
     pause
     goto MENU
 )
@@ -118,16 +129,51 @@ if "!alreadyInstalled!"=="1" (
     echo Installing !selectedFriendly! ...
     echo ^(--web-download is used to avoid a known WSL bug where install
     echo   can hang at 0.0%% - see Microsoft's WSL install docs^)
-    wsl.exe --install -d "!selectedName!" --no-launch --web-download
-    if not "!errorlevel!"=="0" (
-        echo [ERROR] wsl.exe --install failed for "!selectedName!".
+
+    set "installLog=%TEMP%\wsl_setup_install.log"
+    set "installErrLog=%TEMP%\wsl_setup_install_err.log"
+    set "installScript=%TEMP%\wsl_setup_install_progress.ps1"
+    if exist "!installLog!" del "!installLog!" >nul 2>&1
+    if exist "!installErrLog!" del "!installErrLog!" >nul 2>&1
+    (
+    echo $proc = Start-Process -FilePath 'wsl.exe' -ArgumentList '--install','-d','!selectedName!','--no-launch','--web-download' -RedirectStandardOutput '!installLog!' -RedirectStandardError '!installErrLog!' -PassThru -NoNewWindow
+    echo $spinner = @^('^|','/','-','\'^)
+    echo $i = 0
+    echo while ^(-not $proc.HasExited^) {
+    echo     $elapsed = [Math]::Round^(^(^(Get-Date^) - $proc.StartTime^).TotalSeconds^)
+    echo     $pct = -1
+    echo     if ^(Test-Path '!installLog!'^) {
+    echo         $lastLine = Get-Content '!installLog!' -Tail 5 -ErrorAction SilentlyContinue ^| Where-Object { $_ -match '[\d.]+%%' } ^| Select-Object -Last 1
+    echo         if ^($lastLine -match '[\d.]+%%'^) { $pct = [Math]::Min^(100, [double]^($Matches[0].TrimEnd^('%%'^)^)^) }
+    echo     }
+    echo     if ^($pct -ge 0^) {
+    echo         Write-Progress -Activity "Downloading !selectedFriendly!" -Status "$pct%% - ${elapsed}s elapsed" -PercentComplete $pct
+    echo     } else {
+    echo         Write-Progress -Activity "Downloading !selectedFriendly!" -Status "$^($spinner[$i %% 4]^)  ${elapsed}s elapsed ^(waiting for progress data^)" -PercentComplete -1
+    echo     }
+    echo     $i++
+    echo     Start-Sleep -Milliseconds 300
+    echo }
+    echo Write-Progress -Activity done -Completed
+    echo exit $proc.ExitCode
+    ) > "!installScript!"
+    powershell -NoProfile -ExecutionPolicy Bypass -File "!installScript!"
+    set "installResult=!errorlevel!"
+    del "!installScript!" >nul 2>&1
+
+    if not "!installResult!"=="0" (
+        echo %CLR_RED%[ERROR]%CLR_RESET% wsl.exe --install failed for "!selectedName!".
         echo         If this is the very first WSL install on this PC, Windows
         echo         may need a restart to finish enabling WSL. Restart, then
-        echo         run this tool again.
+        echo         run this tool again. Details:
+        type "!installLog!" 2>nul
+        type "!installErrLog!" 2>nul
+        del "!installLog!" "!installErrLog!" >nul 2>&1
         set "wslPass="
         pause
         goto MENU
     )
+    del "!installLog!" "!installErrLog!" >nul 2>&1
 )
 
 echo.
@@ -163,7 +209,7 @@ set "waitResult=!errorlevel!"
 if "!waitResult!"=="0" goto READY
 
 if "!waitResult!"=="2" (
-    echo [ERROR] Windows needs a restart to finish enabling WSL.
+    echo %CLR_RED%[ERROR]%CLR_RESET% Windows needs a restart to finish enabling WSL.
     echo         A pending-restart flag was detected - !selectedFriendly! cannot
     echo         finish starting until you reboot. Restart your PC, then run
     echo         this tool again and pick the same option - it will pick up
@@ -173,7 +219,7 @@ if "!waitResult!"=="2" (
     goto MENU
 )
 
-echo [ERROR] !selectedFriendly! did not become ready after 5 minutes.
+echo %CLR_RED%[ERROR]%CLR_RESET% !selectedFriendly! did not become ready after 5 minutes.
 echo         Try launching it manually first: wsl -d !selectedName!
 echo         If that also hangs, Windows may need a restart to finish
 echo         enabling WSL. Restart your PC, then run this tool again
@@ -221,7 +267,7 @@ set "userScriptResult=!errorlevel!"
 del "%userScript%" >nul 2>&1
 
 if not "!userScriptResult!"=="0" (
-    echo [ERROR] Creating the Linux user failed inside !selectedFriendly!. See output above.
+    echo %CLR_RED%[ERROR]%CLR_RESET% Creating the Linux user failed inside !selectedFriendly!. See output above.
     set "wslUser="
     set "wslPass="
     pause
@@ -234,9 +280,9 @@ echo Restarting !selectedFriendly! so the new default user takes effect ...
 wsl.exe --terminate !selectedName! >nul 2>&1
 
 echo.
-echo =========================================================
+echo %CLR_CYAN%=========================================================%CLR_RESET%
 echo   Verifying registration
-echo =========================================================
+echo %CLR_CYAN%=========================================================%CLR_RESET%
 REM --- Right after --terminate the WSL service can briefly report
 REM     WSL_E_DISTRO_NOT_FOUND even though the distro is fine - retry
 REM     instead of failing on the first check.
@@ -253,9 +299,9 @@ for /l %%i in (1,1,10) do (
 )
 
 if "!verifyOk!"=="1" (
-    echo [OK] User "!wslUser!" is registered in !selectedFriendly!.
+    echo %CLR_GREEN%[OK]%CLR_RESET% User "!wslUser!" is registered in !selectedFriendly!.
 ) else (
-    echo [WARN] Could not confirm user "!wslUser!". Check manually with:
+    echo %CLR_YELLOW%[WARN]%CLR_RESET% Could not confirm user "!wslUser!". Check manually with:
     echo        wsl -d !selectedName! cat /etc/passwd
     pause
     goto ASKAGAIN
@@ -263,9 +309,9 @@ if "!verifyOk!"=="1" (
 
 for /f "usebackq delims=" %%w in (`wsl.exe -d !selectedName! -- whoami`) do set "defUser=%%w"
 if /i "!defUser!"=="!wslUser!" (
-    echo [OK] "!wslUser!" is set as the default user in !selectedFriendly!.
+    echo %CLR_GREEN%[OK]%CLR_RESET% "!wslUser!" is set as the default user in !selectedFriendly!.
 ) else (
-    echo [WARN] Default user may not be applied yet ^(got "!defUser!"^). Try:
+    echo %CLR_YELLOW%[WARN]%CLR_RESET% Default user may not be applied yet ^(got "!defUser!"^). Try:
     echo        wsl --terminate !selectedName!  then  wsl -d !selectedName!
 )
 
@@ -274,10 +320,10 @@ wsl.exe --set-default !selectedName! >nul 2>&1
 
 for /f "usebackq delims=" %%c in (`wsl.exe -- whoami 2^>nul`) do set "cleanCheck=%%c"
 if /i "!cleanCheck!"=="!wslUser!" (
-    echo [OK] Typing "wsl" in any cmd/PowerShell window now logs straight
+    echo %CLR_GREEN%[OK]%CLR_RESET% Typing "wsl" in any cmd/PowerShell window now logs straight
     echo      into !selectedFriendly! as "!wslUser!" - no prompts, no errors.
 ) else (
-    echo [WARN] "wsl" did not come up clean as "!wslUser!" ^(got "!cleanCheck!"^).
+    echo %CLR_YELLOW%[WARN]%CLR_RESET% "wsl" did not come up clean as "!wslUser!" ^(got "!cleanCheck!"^).
     echo        Check with: wsl --status  and  wsl -l -v
 )
 
@@ -292,11 +338,11 @@ echo Creating start-wsl.bat next to this script for quick launching ...
 ) > "%~dp0start-wsl.bat"
 
 echo.
-echo =========================================================
+echo %CLR_GREEN%=========================================================%CLR_RESET%
 echo   Registration complete. No username/password was written
 echo   to any file, log, or disk - only used in memory to create
 echo   the account, then cleared. Closing in 5 seconds...
-echo =========================================================
+echo %CLR_GREEN%=========================================================%CLR_RESET%
 timeout /t 5 >nul
 exit /b
 
@@ -308,8 +354,8 @@ goto END
 
 :END
 echo.
-echo =========================================================
+echo %CLR_CYAN%=========================================================%CLR_RESET%
 echo   Done.
-echo =========================================================
+echo %CLR_CYAN%=========================================================%CLR_RESET%
 echo.
 pause
