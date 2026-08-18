@@ -7,6 +7,11 @@ REM  wsl-setup.bat
 REM  Simple 2-option WSL installer with fully automatic user creation
 REM =====================================================================
 
+REM WSL_UTF8=1 makes wsl.exe emit UTF-8 instead of UTF-16 when its output
+REM is piped/redirected (which it always is under `for /f`) - without this,
+REM parsing wsl.exe output in batch silently returns garbage.
+set "WSL_UTF8=1"
+
 REM --- Self-elevate to Administrator ---
 net session >nul 2>&1
 if not "%errorlevel%"=="0" (
@@ -103,13 +108,9 @@ if "!wslPass!"=="" (
 
 echo.
 echo Checking whether !selectedFriendly! is already installed ...
-set "listfile3=%TEMP%\wsl_precheck_list.txt"
-powershell -NoProfile -Command "(wsl.exe -l -q) | Out-File -FilePath '%listfile3%' -Encoding ascii" >nul 2>&1
 set "alreadyInstalled=0"
-if exist "%listfile3%" (
-    for /f "usebackq tokens=* delims=" %%a in ("%listfile3%") do (
-        if /i "%%a"=="!selectedName!" set "alreadyInstalled=1"
-    )
+for /f "usebackq delims=" %%a in (`wsl.exe -l -q`) do (
+    if /i "%%a"=="!selectedName!" set "alreadyInstalled=1"
 )
 
 if "!alreadyInstalled!"=="1" (
@@ -186,12 +187,53 @@ goto MENU
 :READY
 echo Creating user "!wslUser!" automatically ...
 echo Granting passwordless sudo so system commands run without a prompt ...
-wsl.exe -d "!selectedName!" -u root -- bash -c "id -u '!wslUser!' >/dev/null 2>&1 || useradd -m -s /bin/bash '!wslUser!'; echo '!wslUser!:!wslPass!' | chpasswd; usermod -aG sudo '!wslUser!' 2>/dev/null; printf '%s ALL=(ALL) NOPASSWD:ALL\n' '!wslUser!' > /etc/sudoers.d/'!wslUser!'; chmod 0440 /etc/sudoers.d/'!wslUser!'; printf '[user]\ndefault=%s\n' '!wslUser!' > /etc/wsl.conf"
+
+REM  cmd.exe treats a literal |, ||, &&, or > as ITS OWN operator even
+REM  inside double quotes - a single-line `bash -c "... | chpasswd ..."`
+REM  with several of those gets silently chopped into multiple cmd-level
+REM  commands and never reaches bash intact. The username/password are
+REM  also never spliced as raw text into any parsed command line: they're
+REM  base64-encoded and forwarded through WSLENV, then decoded inside a
+REM  small generated script that's executed as `bash <path>` instead.
+set "userScript=%TEMP%\wsl_setup_apply_user.sh"
+set "WSL_SETUP_USER_RAW=!wslUser!"
+set "WSL_SETUP_PASS_RAW=!wslPass!"
+for /f "usebackq delims=" %%B in (`powershell -NoProfile -Command "[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($env:WSL_SETUP_USER_RAW))"`) do set "USER_B64=%%B"
+for /f "usebackq delims=" %%B in (`powershell -NoProfile -Command "[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($env:WSL_SETUP_PASS_RAW))"`) do set "PASS_B64=%%B"
+set "WSLENV=USER_B64:PASS_B64"
+
+(
+echo #^^!/bin/bash
+echo set -e
+echo u=$(printf '%%s' "$USER_B64" ^| base64 -d^)
+echo p=$(printf '%%s' "$PASS_B64" ^| base64 -d^)
+echo id -u "$u" ^>/dev/null 2^>^&1 ^|^| useradd -m -s /bin/bash "$u"
+echo printf '%%s:%%s\n' "$u" "$p" ^| chpasswd
+echo usermod -aG sudo "$u" 2^>/dev/null ^|^| true
+echo printf '%%s ALL=^(ALL^) NOPASSWD:ALL\n' "$u" ^> /etc/sudoers.d/"$u"
+echo chmod 0440 /etc/sudoers.d/"$u"
+echo printf '[user]\ndefault=%%s\n' "$u" ^> /etc/wsl.conf
+) > "%userScript%"
+
+for /f "usebackq delims=" %%P in (`wsl.exe -d !selectedName! -- wslpath -a "%userScript%"`) do set "SCRIPTWSL=%%P"
+REM strip CRLF - batch's `>` redirection writes \r\n, which corrupts bash parsing
+wsl.exe -d !selectedName! -u root -- sed -i "s/\r$//" "%SCRIPTWSL%"
+wsl.exe -d !selectedName! -u root -- bash "%SCRIPTWSL%"
+set "userScriptResult=!errorlevel!"
+del "%userScript%" >nul 2>&1
+
+if not "!userScriptResult!"=="0" (
+    echo [ERROR] Creating the Linux user failed inside !selectedFriendly!. See output above.
+    set "wslUser="
+    set "wslPass="
+    pause
+    goto MENU
+)
 
 set "wslPass="
 
 echo Restarting !selectedFriendly! so the new default user takes effect ...
-wsl.exe --terminate "!selectedName!" >nul 2>&1
+wsl.exe --terminate !selectedName! >nul 2>&1
 
 echo.
 echo =========================================================
@@ -203,7 +245,7 @@ REM     instead of failing on the first check.
 set "verifyOk=0"
 for /l %%i in (1,1,10) do (
     if "!verifyOk!"=="0" (
-        wsl.exe -d "!selectedName!" -u "!wslUser!" -- id -un >nul 2>&1
+        wsl.exe -d !selectedName! -u !wslUser! -- id -un >nul 2>&1
         if "!errorlevel!"=="0" (
             set "verifyOk=1"
         ) else (
@@ -216,21 +258,21 @@ if "!verifyOk!"=="1" (
     echo [OK] User "!wslUser!" is registered in !selectedFriendly!.
 ) else (
     echo [WARN] Could not confirm user "!wslUser!". Check manually with:
-    echo        wsl -d "!selectedName!" cat /etc/passwd
+    echo        wsl -d !selectedName! cat /etc/passwd
     pause
     goto ASKAGAIN
 )
 
-for /f "usebackq delims=" %%w in (`wsl.exe -d "!selectedName!" -- whoami`) do set "defUser=%%w"
+for /f "usebackq delims=" %%w in (`wsl.exe -d !selectedName! -- whoami`) do set "defUser=%%w"
 if /i "!defUser!"=="!wslUser!" (
     echo [OK] "!wslUser!" is set as the default user in !selectedFriendly!.
 ) else (
     echo [WARN] Default user may not be applied yet ^(got "!defUser!"^). Try:
-    echo        wsl --terminate "!selectedName!"  then  wsl -d !selectedName!
+    echo        wsl --terminate !selectedName!  then  wsl -d !selectedName!
 )
 
 echo Making !selectedFriendly! the default so plain "wsl" opens it ...
-wsl.exe --set-default "!selectedName!" >nul 2>&1
+wsl.exe --set-default !selectedName! >nul 2>&1
 
 for /f "usebackq delims=" %%c in (`wsl.exe -- whoami 2^>nul`) do set "cleanCheck=%%c"
 if /i "!cleanCheck!"=="!wslUser!" (
@@ -274,16 +316,11 @@ echo =========================================================
 echo.
 echo   Looking for WSL distros already installed ...
 
-set "listfile2=%TEMP%\wsl_installed_list.txt"
-powershell -NoProfile -Command "(wsl.exe -l -q) | Out-File -FilePath '%listfile2%' -Encoding ascii" >nul 2>&1
-
 set wcount=0
-if exist "%listfile2%" (
-    for /f "usebackq tokens=* delims=" %%a in ("%listfile2%") do (
-        if not "%%a"=="" (
-            set /a wcount+=1
-            set "wdistro_!wcount!=%%a"
-        )
+for /f "usebackq delims=" %%a in (`wsl.exe -l -q`) do (
+    if not "%%a"=="" (
+        set /a wcount+=1
+        set "wdistro_!wcount!=%%a"
     )
 )
 
@@ -324,8 +361,26 @@ echo Installing Wine into "!wineTarget!" - this runs directly as root,
 echo so there is no sudo password prompt. Output is shown live below.
 echo.
 
-wsl.exe -d "!wineTarget!" -u root -- bash -c "dpkg --add-architecture i386 && apt-get update && apt-get install -y wine wine32 wine64 winetricks"
-if not "!errorlevel!"=="0" (
+REM  same reason as the user-creation step: cmd.exe treats && inside a
+REM  quoted bash -c string as ITS OWN operator, splitting the command
+REM  before it ever reaches bash. Use a generated script file instead.
+set "wineScript=%TEMP%\wsl_setup_install_wine.sh"
+(
+echo #^^!/bin/bash
+echo set -e
+echo dpkg --add-architecture i386
+echo apt-get update
+echo apt-get install -y wine wine32 wine64
+echo apt-get install -y winetricks ^|^| echo "[WARN] winetricks package unavailable on this distro/release - Wine itself installed fine, skipping winetricks."
+) > "%wineScript%"
+
+for /f "usebackq delims=" %%P in (`wsl.exe -d !wineTarget! -- wslpath -a "%wineScript%"`) do set "WINESCRIPTWSL=%%P"
+wsl.exe -d !wineTarget! -u root -- sed -i "s/\r$//" "%WINESCRIPTWSL%"
+wsl.exe -d !wineTarget! -u root -- bash "%WINESCRIPTWSL%"
+set "wineScriptResult=!errorlevel!"
+del "%wineScript%" >nul 2>&1
+
+if not "!wineScriptResult!"=="0" (
     echo.
     echo [ERROR] Wine install failed inside "!wineTarget!". See the output above for details.
     pause
@@ -336,12 +391,12 @@ echo.
 echo =========================================================
 echo   Verifying Wine
 echo =========================================================
-for /f "usebackq delims=" %%v in (`wsl.exe -d "!wineTarget!" -- wine --version 2^>nul`) do set "wineVer=%%v"
+for /f "usebackq delims=" %%v in (`wsl.exe -d !wineTarget! -- wine --version 2^>nul`) do set "wineVer=%%v"
 if not "!wineVer!"=="" (
     echo [OK] Wine installed: !wineVer!
 ) else (
     echo [WARN] Could not confirm Wine version. Try manually:
-    echo        wsl -d "!wineTarget!" -- wine --version
+    echo        wsl -d !wineTarget! -- wine --version
 )
 
 echo.
