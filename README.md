@@ -15,7 +15,7 @@ Fully automatic WSL setup for a Windows PC. Run one `.bat` file, pick a distro f
 5. The script installs the distro (`wsl --install -d <name> --no-launch --web-download`), waits for it to become ready, then creates the Linux user itself — `useradd`, `chpasswd`, adds to `sudo`, and grants **passwordless sudo** (`/etc/sudoers.d/<user>`) so system commands run without a prompt.
 6. It sets that user as the distro's default user, sets the distro as the **machine's** default (`wsl --set-default`), and verifies that typing plain `wsl` in any terminal drops straight into that user with no prompts.
 7. It writes/refreshes `start-wsl.bat` next to itself — a one-line launcher (`wsl.exe`) for quick access afterward.
-8. On success the window closes itself after a few seconds; on any error it pauses so you can read what went wrong.
+8. The window never closes itself — every path, success or error, ends with a pause so you can read the output.
 
 ## What it does differently from the built-in `wsl --install` wizard
 

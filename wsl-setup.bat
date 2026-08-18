@@ -341,10 +341,10 @@ echo.
 echo %CLR_GREEN%=========================================================%CLR_RESET%
 echo   Registration complete. No username/password was written
 echo   to any file, log, or disk - only used in memory to create
-echo   the account, then cleared. Closing in 5 seconds...
+echo   the account, then cleared.
 echo %CLR_GREEN%=========================================================%CLR_RESET%
-timeout /t 5 >nul
-exit /b
+echo.
+pause
 
 :ASKAGAIN
 echo.
