@@ -165,6 +165,26 @@ if /i "!wslUser!"=="root" (
     goto MENU
 )
 
+REM  Validate the username against Linux useradd rules BEFORE installing a whole
+REM  distro, so an invalid name fails fast here with a clear message instead of
+REM  blowing up cryptically mid-setup when `useradd` rejects it. Rules: start
+REM  with a lowercase letter or underscore, then lowercase letters/digits/hyphen/
+REM  underscore, max 32 chars. Delayed expansion (!wslUser!) means special chars
+REM  in the value are not re-parsed as operators, so this check is injection-safe.
+echo(!wslUser!| findstr /r "^[a-z_][a-z0-9_-]*$" >nul
+if errorlevel 1 (
+    echo %CLR_RED%[ERROR]%CLR_RESET% "!wslUser!" is not a valid Linux username.
+    echo         Use only lowercase letters, digits, hyphen and underscore, and
+    echo         start with a lowercase letter or underscore ^(e.g. "dev", "my_user"^).
+    pause
+    goto MENU
+)
+if not "!wslUser:~32!"=="" (
+    echo %CLR_RED%[ERROR]%CLR_RESET% Username is too long - Linux usernames are max 32 characters.
+    pause
+    goto MENU
+)
+
 for /f "usebackq delims=" %%p in (`powershell -NoProfile -Command "$s = Read-Host -AsSecureString '  New Linux password'; $b = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($s); [Runtime.InteropServices.Marshal]::PtrToStringAuto($b)"`) do set "wslPass=%%p"
 
 if "!wslPass!"=="" (
@@ -403,6 +423,40 @@ echo   the account, then cleared.
 echo %CLR_GREEN%=========================================================%CLR_RESET%
 echo.
 pause
+
+REM --- Optional: run setup-dev-tools.sh inside the new distro ---
+REM  Offered here (not chained automatically) so the core WSL setup stays fast
+REM  and self-contained; dev tools are a separate, slower, network-heavy step.
+REM  Runs as the distro's default user (the account just created) - no -u needed,
+REM  and the NOPASSWD sudo granted above lets its apt/docker steps run unattended.
+if exist "%~dp0setup-dev-tools.sh" (
+    echo.
+    set "devChoice="
+    set /p devChoice="Install dev tools now inside !selectedFriendly! - Node, Docker, GitHub CLI? [y/n]: "
+    if /i "!devChoice!"=="y" (
+        echo.
+        echo Running setup-dev-tools.sh inside !selectedFriendly! ...
+        REM  Resolve the Windows path to a WSL path, copy it in, strip CR - the file
+        REM  may be checked out with CRLF on Windows - then run it as 'bash path'
+        REM  with no shell metacharacters on the command line, which cmd.exe would
+        REM  otherwise mangle even inside quotes. Note: no parens in these in-block
+        REM  comments on purpose - cmd counts them against the enclosing block.
+        for /f "usebackq delims=" %%S in (`wsl.exe -d !selectedName! -- wslpath -a "%~dp0setup-dev-tools.sh"`) do set "DEVSCRIPTWSL=%%S"
+        wsl.exe -d !selectedName! -- cp "!DEVSCRIPTWSL!" /tmp/wsl_setup_devtools.sh
+        wsl.exe -d !selectedName! -u root -- sed -i "s/\r$//" /tmp/wsl_setup_devtools.sh
+        wsl.exe -d !selectedName! -- bash /tmp/wsl_setup_devtools.sh
+        set "devResult=!errorlevel!"
+        wsl.exe -d !selectedName! -- rm -f /tmp/wsl_setup_devtools.sh >nul 2>&1
+        if not "!devResult!"=="0" (
+            echo %CLR_YELLOW%[WARN]%CLR_RESET% Dev-tools setup reported an error above. You can re-run it
+            echo        anytime inside WSL with: bash setup-dev-tools.sh
+        ) else (
+            echo %CLR_GREEN%[OK]%CLR_RESET% Dev-tools setup finished.
+        )
+        echo.
+        pause
+    )
+)
 
 :ASKAGAIN
 echo.
