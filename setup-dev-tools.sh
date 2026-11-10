@@ -16,21 +16,36 @@ fi
 export NVM_DIR="$HOME/.nvm"
 # shellcheck disable=SC1091
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-echo "--- Installing Node LTS ---"
-nvm install --lts
-nvm alias default 'lts/*'
+# Only install Node when there is no default yet - avoids a network round-trip
+# and a redundant reinstall on every re-run (this script is meant to be re-runnable).
+if ! nvm which default >/dev/null 2>&1; then
+    echo "--- Installing Node LTS ---"
+    nvm install --lts
+    nvm alias default 'lts/*'
+else
+    echo "--- Node already installed ($(nvm which default)) - skipping ---"
+fi
 
 # ---- Docker Engine ----
+DOCKER_GROUP_ADDED=0
 if ! command -v docker >/dev/null 2>&1; then
     echo "--- Installing Docker ---"
     curl -fsSL --retry 3 --retry-delay 2 https://get.docker.com | sudo sh
     sudo usermod -aG docker "$USER"
+    DOCKER_GROUP_ADDED=1
 fi
 
 # enable systemd so dockerd persists across shells (needs wsl --shutdown to take effect)
-if [ ! -f /etc/wsl.conf ] || ! grep -q "systemd=true" /etc/wsl.conf; then
+NEEDS_RESTART=0
+if [ ! -f /etc/wsl.conf ] || ! grep -q '^systemd=true' /etc/wsl.conf; then
     echo "--- Enabling systemd in /etc/wsl.conf ---"
-    printf '[boot]\nsystemd=true\n' | sudo tee -a /etc/wsl.conf >/dev/null
+    if [ -f /etc/wsl.conf ] && grep -q '^\[boot\]' /etc/wsl.conf; then
+        # [boot] section already exists - add systemd under it instead of
+        # appending a duplicate [boot] section.
+        sudo sed -i '/^\[boot\]/a systemd=true' /etc/wsl.conf
+    else
+        printf '[boot]\nsystemd=true\n' | sudo tee -a /etc/wsl.conf >/dev/null
+    fi
     NEEDS_RESTART=1
 fi
 
@@ -52,6 +67,12 @@ node -v 2>/dev/null || echo "node: (open a new shell first)"
 docker --version 2>/dev/null || true
 gh --version 2>/dev/null || true
 echo "============================================"
+
+if [ "$DOCKER_GROUP_ADDED" = "1" ]; then
+    echo
+    echo "You were added to the 'docker' group. For docker to work without sudo,"
+    echo "open a new shell (or run 'newgrp docker') so the group membership applies."
+fi
 
 if [ "${NEEDS_RESTART:-0}" = "1" ]; then
     echo
