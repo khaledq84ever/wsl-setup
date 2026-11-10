@@ -201,7 +201,9 @@ done
 # ---- the PowerShell embedded in wsl-setup.bat (needs pwsh; skipped if absent) ----
 PWSH_BIN="${PWSH:-$(command -v pwsh || true)}"
 if [ -n "$PWSH_BIN" ] && [ -x "$PWSH_BIN" ]; then
-    if "$PWSH_BIN" -NoProfile -File "$HERE/bat-powershell.ps1"; then ok; else bad "bat-powershell.ps1 reported failures (see above)"; fi
+    for t in bat-powershell.ps1 list-distros.tests.ps1; do
+        if "$PWSH_BIN" -NoProfile -File "$HERE/$t"; then ok; else bad "$t reported failures (see above)"; fi
+    done
 else
     echo "=== PS checks SKIPPED: pwsh not found (set PWSH=/path/to/pwsh to run them) ==="
 fi
