@@ -176,7 +176,8 @@ def run_scenario(name, state, steps, work, bindir, bash):
     env = dict(os.environ)
     env.update({"E2E_STATE": st, "E2E_PYTHON": sys.executable, "E2E_FAKE": FAKE, "E2E_BASH": bash,
                 "PATH": bindir + os.pathsep + os.environ["PATH"]})
-    con = Console(f'cmd.exe /c "{os.path.join(app, "wsl-setup.bat")}"', app, env)
+    # A list, not a string: pywinpty quotes each argument itself.
+    con = Console(["cmd.exe", "/c", os.path.join(app, "wsl-setup.bat")], app, env)
     err = con.drive(steps)
     out = con.text()
     open(os.path.join(st, "out.txt"), "w", encoding="utf-8").write(out)
