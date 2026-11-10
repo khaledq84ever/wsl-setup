@@ -219,6 +219,16 @@ def fake_wsl(argv, env):
         except OSError:
             pass
         return out("")
+    if cmd == ["bash", "/tmp/wsl_setup_devtools.sh"]:
+        # Don't really install Node/Docker/gh. Prove the plumbing instead: the
+        # script that arrived (after wslpath/cp/sed) must be byte-identical
+        # to the repo's LF setup-dev-tools.sh, and record who ran it.
+        repo = os.path.join(HERE, "..", "..", "setup-dev-tools.sh")
+        want = open(repo, "rb").read().replace(b"\r\n", b"\n")
+        got = open(m(cmd[1]), "rb").read()
+        with open(os.path.join(STATE, "devtools.json"), "w") as f:
+            json.dump({"user": user, "same": got == want}, f)
+        return out("fake dev tools ran\n")
     if cmd[:1] == ["bash"] and len(cmd) == 2:
         if ON_WINDOWS:  # Git Bash; it converts this Windows-style PATH itself
             git_usr = os.path.join(os.path.dirname(os.path.dirname(E2E_BASH)), "usr", "bin")

@@ -134,7 +134,8 @@ run_scenario happy '{"installed":[],"online":"utf16"}' "[
   [$MENU, \"6\"],
   [$USER, \"Dev\"], [$USER, \"dev\"],
   [\"@PASSWORD\", \"abc\nabd\"], [\"@PASSWORD\", $PWJ],
-  [\"Registration complete.\", null], [$KEY, \"\"], [$DEV, \"n\"], [$AGAIN, \"n\"], [\"Done.\", null], [$KEY, \"\"]]"
+  [\"Registration complete.\", null], [$KEY, \"\"], [$DEV, \"y\"],
+  [\"Dev-tools setup finished.\", null], [$KEY, \"\"], [$AGAIN, \"n\"], [\"Done.\", null], [$KEY, \"\"]]"
 has '"99" is not a valid option.'
 has '"1&echo INJECTED" is not a valid option.'
 hasnt 'INJECTED'
@@ -152,6 +153,10 @@ has '[OK] User "dev" is registered in Ubuntu 24.04 LTS.'
 has '[OK] "dev" is set as the default user'
 has '[OK] Typing "wsl" in any cmd/PowerShell window now logs straight'
 has 'Registration complete.'
+# Dev tools: same script arrived intact and ran as the new user, not root.
+DT=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["user"], d["same"])' "$ST/devtools.json" 2>/dev/null || echo missing)
+[ "$DT" = "dev True" ] && ok || bad "dev tools run: [$DT], want 'dev True'"
+has '[OK] Dev-tools setup finished.'
 
 end_scenario
 
