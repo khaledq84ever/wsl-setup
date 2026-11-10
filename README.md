@@ -45,7 +45,9 @@ The in-distro shell logic is covered by a harness that needs neither Windows nor
 bash test/run-tests.sh
 ```
 
-It runs the real `setup-user.sh` (with `useradd`/`chpasswd`/`usermod` stubbed and `/etc` paths redirected) 100 times per scenario. The scenarios are: fresh machine, preserving an existing `[boot] systemd=true`, idempotent re-run, `[user]` without `default=`, and sudo missing from the image. Every run also checks that `chpasswd` got the exact password, using one full of shell- and cmd-special characters. It then sources `setup-dev-tools.sh` and runs its real `enable_systemd` across seven wsl.conf states. `wsl-setup.bat` itself still needs a real Windows + WSL smoke test; the harness covers the bash it runs inside the distro, where the correctness-critical logic lives.
+It runs the real `setup-user.sh` (with `useradd`/`chpasswd`/`usermod` stubbed and `/etc` paths redirected) 100 times per scenario. The scenarios are: fresh machine, preserving an existing `[boot] systemd=true`, idempotent re-run, `[user]` without `default=`, and sudo missing from the image. Every run also checks that `chpasswd` got the exact password, using one full of shell- and cmd-special characters. It then sources `setup-dev-tools.sh` and runs its real `enable_systemd` across seven wsl.conf states. If PowerShell 7 (`pwsh`) is installed (it runs on Linux too; point `PWSH=` at it if it isn't on `PATH`), `test/bat-powershell.ps1` also runs. It pulls every PowerShell snippet out of `wsl-setup.bat`, including the scripts the `.bat` writes out with `echo`, and parses each one. It then runs the real username/menu validation against hostile input (`dev&calc`, `dEv`, `1&calc`, …) and the real password step, checking that the returned base64 decodes to exactly the password typed.
+
+`wsl-setup.bat` itself still needs a real Windows + WSL smoke test; the harness covers the bash it runs inside the distro, where the correctness-critical logic lives.
 
 ## Notes
 
