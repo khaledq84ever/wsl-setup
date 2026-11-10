@@ -12,7 +12,7 @@ Fully automatic WSL setup for a Windows PC. Run one `.bat` file, pick any distro
 2. Run `wsl-setup.bat` (double-click it, or run from `cmd.exe`). It self-elevates to Administrator via UAC.
 3. Pick a distro from the numbered menu — built live from `wsl.exe --list --online`, so it's whatever Microsoft currently offers (Ubuntu, Debian, Fedora, Arch, openSUSE, Kali, AlmaLinux, Oracle Linux, and more), never a hardcoded list that goes stale.
 4. Enter a new Linux username and password when prompted (password input is masked). The username is validated up front against Linux rules — lowercase letters, digits, hyphen and underscore, starting with a letter or underscore, max 32 chars — so an invalid name is rejected immediately instead of failing cryptically mid-install.
-5. The script installs the distro (`wsl --install -d <name> --no-launch --web-download`), waits for it to become ready, then creates the Linux user itself — `useradd`, `chpasswd`, adds to `sudo`, and grants **passwordless sudo** (`/etc/sudoers.d/<user>`) so system commands run without a prompt.
+5. The script installs the distro (`wsl --install -d <name> --no-launch --web-download`), waits for it to become ready, then runs `setup-user.sh` inside it to create the Linux user — `useradd`, `chpasswd`, adds to `sudo` (or `wheel` on Fedora/Arch/openSUSE), and grants **passwordless sudo** (`/etc/sudoers.d/<user>`) so system commands run without a prompt. It also sets the default user in `/etc/wsl.conf` **without clobbering** any existing section (e.g. a `[boot] systemd=true` added by `setup-dev-tools.sh`).
 6. It sets that user as the distro's default user, sets the distro as the **machine's** default (`wsl --set-default`), and verifies that typing plain `wsl` in any terminal drops straight into that user with no prompts.
 7. It writes/refreshes `start-wsl.bat` next to itself — a one-line launcher (`wsl.exe`) for quick access afterward.
 8. The window never closes itself — every path, success or error, ends with a pause so you can read the output.
@@ -35,6 +35,16 @@ Fully automatic WSL setup for a Windows PC. Run one `.bat` file, pick any distro
   ```
 
 It is safe to re-run: Node is skipped if already installed, Docker/gh are skipped if present, and systemd is only enabled once. After it adds you to the `docker` group you must open a new shell (or run `newgrp docker`) before `docker` works without `sudo`, and because it enables systemd you'll be told to run `wsl --shutdown` once for Docker to start automatically.
+
+## Testing
+
+The in-distro shell logic is covered by a harness that needs neither Windows nor a real WSL distro:
+
+```bash
+bash test/run-tests.sh
+```
+
+It runs the real `setup-user.sh` (with `useradd`/`chpasswd`/`usermod` stubbed and `/etc` paths redirected) 100 times per scenario — fresh machine, preserving an existing `[boot] systemd=true`, and idempotent re-run — plus the `setup-dev-tools.sh` wsl.conf logic across its four states. `wsl-setup.bat` itself still needs a real Windows + WSL smoke test; the harness covers the bash it runs inside the distro, where the correctness-critical logic lives.
 
 ## Notes
 
