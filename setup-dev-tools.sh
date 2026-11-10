@@ -59,13 +59,16 @@ main() {
     local me
     me=$(id -un)
 
-    sudo apt-get update -y
-    sudo apt-get install -y curl git ca-certificates gnupg build-essential
+    # noninteractive: a package that asks a debconf question (tzdata etc.)
+    # would otherwise stall the unattended run started by wsl-setup.bat.
+    export DEBIAN_FRONTEND=noninteractive
+    sudo -E apt-get update -y
+    sudo -E apt-get install -y curl git ca-certificates gnupg build-essential
 
     # ---- Node.js via nvm ----
     if [ ! -d "$HOME/.nvm" ]; then
         echo "--- Installing nvm ---"
-        curl -fsSL --retry 3 --retry-delay 2 https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.6/install.sh | bash
+        curl -fsSL --retry 3 --retry-delay 2 https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.8/install.sh | bash
     fi
     export NVM_DIR="$HOME/.nvm"
     # nvm.sh is not written for `set -u`; relax it while nvm runs.
@@ -112,8 +115,8 @@ main() {
         sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
         echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
             | sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null
-        sudo apt-get update -y
-        sudo apt-get install -y gh
+        sudo -E apt-get update -y
+        sudo -E apt-get install -y gh
     fi
 
     echo

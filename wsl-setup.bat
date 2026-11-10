@@ -28,10 +28,16 @@ set "CLR_RED=%ESC%[91m"
 set "CLR_BOLD=%ESC%[1m"
 
 REM --- Self-elevate to Administrator ---
-net session >nul 2>&1
+REM  fltmc only succeeds elevated and, unlike `net session`, does not depend on
+REM  the Server service - with that service stopped, `net session` always
+REM  fails and the script would re-launch itself elevated forever.
+REM  The script path goes to PowerShell via an env var, not spliced into the
+REM  command string, so a folder name containing an apostrophe still works.
+fltmc >nul 2>&1
 if not "%errorlevel%"=="0" (
     echo This tool needs Administrator rights. Requesting elevation...
-    powershell -NoProfile -Command "try { Start-Process -FilePath '%~f0' -Verb RunAs -ErrorAction Stop } catch { exit 1 }"
+    set "WSL_SETUP_SELF=%~f0"
+    powershell -NoProfile -Command "try { Start-Process -FilePath $env:WSL_SETUP_SELF -Verb RunAs -ErrorAction Stop } catch { exit 1 }"
     if errorlevel 1 (
         echo.
         echo %CLR_RED%[ERROR]%CLR_RESET% Administrator rights were not granted - nothing was changed.
@@ -45,6 +51,9 @@ if not "%errorlevel%"=="0" (
 
 REM --- Check Windows version supports WSL (needs Win10 build 19041+ or Win11) ---
 for /f "usebackq delims=" %%b in (`powershell -NoProfile -Command "[System.Environment]::OSVersion.Version.Build"`) do set "winBuild=%%b"
+REM  If PowerShell returned nothing, skip the check rather than crash on a
+REM  malformed `if  LSS 19041` - wsl.exe will report a too-old build itself.
+if not defined winBuild set "winBuild=99999"
 if !winBuild! LSS 19041 (
     cls
     echo %CLR_CYAN%=========================================================%CLR_RESET%
@@ -135,27 +144,28 @@ echo.
 set "choice="
 set /p choice="Choose an option: "
 
-if "%choice%"=="0" goto END
+if "!choice!"=="0" goto END
 
-echo %choice%| findstr /r "^[1-9][0-9]*$" >nul
-if errorlevel 1 (
-    echo.
-    echo %CLR_RED%[ERROR]%CLR_RESET% "%choice%" is not a valid option.
-    echo.
-    pause
-    goto MENU
-)
-if %choice% GTR %DISTROCOUNT% (
-    echo.
-    echo %CLR_RED%[ERROR]%CLR_RESET% "%choice%" is not a valid option.
-    echo.
-    pause
-    goto MENU
-)
-
-call set "selectedName=%%DISTRONAME_%choice%%%"
-call set "selectedFriendly=%%DISTROFRIENDLY_%choice%%%"
+REM  Validated without percent-expanding the choice into a parsed line: a typed
+REM  "1&something" would otherwise run as a command in this elevated window.
+set "CHK_VAL=!choice!"
+set "CHK_RE=^[1-9][0-9]{0,3}$"
+call :MATCHRE
+if errorlevel 1 goto BADCHOICE
+REM  Digits only from here on. A number past the end of the list simply has no
+REM  DISTRONAME_n, which also covers the old GTR check, including numbers
+REM  too big for cmd's 32-bit compare.
+if not defined DISTRONAME_!choice! goto BADCHOICE
+set "selectedName=!DISTRONAME_%choice%!"
+set "selectedFriendly=!DISTROFRIENDLY_%choice%!"
 goto GOTCHOICE
+
+:BADCHOICE
+echo.
+echo %CLR_RED%[ERROR]%CLR_RESET% "!choice!" is not a valid option.
+echo.
+pause
+goto MENU
 
 :GOTCHOICE
 echo.
@@ -184,9 +194,13 @@ REM  Validate the username against Linux useradd rules BEFORE installing a whole
 REM  distro, so an invalid name fails fast here with a clear message instead of
 REM  blowing up cryptically mid-setup when `useradd` rejects it. Rules: start
 REM  with a lowercase letter or underscore, then lowercase letters/digits/hyphen/
-REM  underscore, max 32 chars. Delayed expansion (!wslUser!) means special chars
-REM  in the value are not re-parsed as operators, so this check is injection-safe.
-echo(!wslUser!| findstr /r "^[a-z_][a-z0-9_-]*$" >nul
+REM  underscore, max 32 chars. The check runs in PowerShell on an env var
+REM  (see :MATCHRE) - not `echo ... | findstr`: findstr's [a-z] also matches
+REM  most UPPERCASE letters, and the left side of a cmd pipe runs with delayed
+REM  expansion off, so the value may not even reach findstr intact.
+set "CHK_VAL=!wslUser!"
+set "CHK_RE=^[a-z_][a-z0-9_-]*$"
+call :MATCHRE
 if errorlevel 1 (
     echo %CLR_RED%[ERROR]%CLR_RESET% "!wslUser!" is not a valid Linux username.
     echo         Use only lowercase letters, digits, hyphen and underscore, and
@@ -517,3 +531,10 @@ set "PASS_B64="
 set "USER_B64="
 set "WSLENV=!origWSLENV!"
 exit /b
+
+REM --- Case-sensitive regex check: exit 0 if env CHK_VAL matches CHK_RE ---
+REM  Both are passed as environment variables, so the value is never parsed
+REM  by cmd and may safely contain & | ^ ! %% or quotes.
+:MATCHRE
+powershell -NoProfile -Command "if ($env:CHK_VAL -cmatch $env:CHK_RE) { exit 0 } else { exit 1 }"
+exit /b %errorlevel%

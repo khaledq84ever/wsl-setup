@@ -198,6 +198,14 @@ for i in $(seq 1 "$ITER"); do
     if enable_systemd "$f" && ! enable_systemd "$f"; then ok; else bad "devG#$i: wrong return code"; fi
 done
 
+# ---- the PowerShell embedded in wsl-setup.bat (needs pwsh; skipped if absent) ----
+PWSH_BIN="${PWSH:-$(command -v pwsh || true)}"
+if [ -n "$PWSH_BIN" ] && [ -x "$PWSH_BIN" ]; then
+    if "$PWSH_BIN" -NoProfile -File "$HERE/bat-powershell.ps1"; then ok; else bad "bat-powershell.ps1 reported failures (see above)"; fi
+else
+    echo "=== PS checks SKIPPED: pwsh not found (set PWSH=/path/to/pwsh to run them) ==="
+fi
+
 echo
 echo "============================================"
 echo " RESULTS: $pass passed, $fail failed"
