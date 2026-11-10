@@ -16,9 +16,17 @@ The fake wsl.exe implements only what wsl-setup.bat uses. Like real WSL, it
 forwards into the "distro" only the env vars named in WSLENV, which is what
 makes the credential-leak assertion meaningful.
 """
-import fcntl, json, os, re, shutil, subprocess, sys, time
+import json, os, re, shutil, subprocess, sys, time
+try:
+    import fcntl
+except ImportError:  # Windows
+    fcntl = None
+    import msvcrt
+
+ON_WINDOWS = os.name == "nt"
 
 STATE = os.environ.get("E2E_STATE", "")
+E2E_BASH = os.environ.get("E2E_BASH", "bash")
 HERE = os.path.dirname(os.path.abspath(__file__))
 WINEPREFIX = os.environ.get("WINEPREFIX", "")
 
@@ -38,8 +46,12 @@ ONLINE = [
 # ---------------------------------------------------------------- state ----
 class Locked:
     def __enter__(self):
-        self.f = open(os.path.join(STATE, "lock"), "w")
-        fcntl.flock(self.f, fcntl.LOCK_EX)
+        self.f = open(os.path.join(STATE, "lock"), "a+")
+        if fcntl:
+            fcntl.flock(self.f, fcntl.LOCK_EX)
+        else:
+            self.f.seek(0)
+            msvcrt.locking(self.f.fileno(), msvcrt.LK_LOCK, 1)
         p = os.path.join(STATE, "state.json")
         self.s = json.load(open(p)) if os.path.exists(p) else {}
         self.s.setdefault("installed", [])
@@ -48,7 +60,11 @@ class Locked:
 
     def __exit__(self, *a):
         json.dump(self.s, open(os.path.join(STATE, "state.json"), "w"), indent=1)
-        fcntl.flock(self.f, fcntl.LOCK_UN)
+        if fcntl:
+            fcntl.flock(self.f, fcntl.LOCK_UN)
+        else:
+            self.f.seek(0)
+            msvcrt.locking(self.f.fileno(), msvcrt.LK_UNLCK, 1)
         self.f.close()
 
 
@@ -60,7 +76,10 @@ def distro_root(name):
 
 
 def win_to_unix(p):
-    """Wine maps Z: to / and C: to $WINEPREFIX/drive_c."""
+    """Wine maps Z: to / and C: to $WINEPREFIX/drive_c. On real Windows the
+    "distro" can read Windows paths directly, so they pass through."""
+    if ON_WINDOWS:
+        return p
     p = p.replace("\\", "/")
     m = re.match(r"^([A-Za-z]):(/.*)?$", p)
     if not m:
@@ -90,6 +109,21 @@ def read_conf_default(root):
         elif sect == "user" and line.startswith("default="):
             return line.split("=", 1)[1].strip()
     return None
+
+
+LXSS = r"Software\Microsoft\Windows\CurrentVersion\Lxss"
+
+
+def register_lxss(name):
+    """On real Windows, record the distro where wsl-setup.bat's registry
+    check looks, like WSL does. E2EFake marks keys the test may delete."""
+    if not ON_WINDOWS:
+        return
+    import uuid, winreg
+    k = winreg.CreateKey(winreg.HKEY_CURRENT_USER, LXSS + "\\{" + str(uuid.uuid4()) + "}")
+    winreg.SetValueEx(k, "DistributionName", 0, winreg.REG_SZ, name)
+    winreg.SetValueEx(k, "E2EFake", 0, winreg.REG_DWORD, 1)
+    winreg.CloseKey(k)
 
 
 def users(root):
@@ -129,6 +163,7 @@ def fake_wsl(argv, env):
             if name not in s["installed"]:
                 s["installed"].append(name)
         distro_root(name)
+        register_lxss(name)
         return out(f"Downloading: {name}\r\n[==========] 100.0%\r\nInstalled {name}.\r\n")
     if argv and argv[0] == "--set-default":
         with Locked() as s:
@@ -159,8 +194,8 @@ def fake_wsl(argv, env):
     if user != "root" and user not in users(root):
         return err(f"<3>WSL ERROR: User not found: {user}\n", 1)
 
-    def m(p):  # distro path -> host path
-        return os.path.join(root, p.lstrip("/"))
+    def m(p):  # distro path -> host path (forward slashes: also fine for Git Bash)
+        return os.path.join(root, p.lstrip("/")).replace("\\", "/")
 
     if cmd == ["true"]:
         return out("")
@@ -172,8 +207,12 @@ def fake_wsl(argv, env):
         shutil.copyfile(cmd[1], m(cmd[2]))
         return out("")
     if cmd[:2] == ["sed", "-i"]:
-        r = subprocess.run(["sed", "-i", cmd[2], m(cmd[3])], capture_output=True)
-        return r.stdout, r.stderr, r.returncode
+        # The only sed the .bat uses: strip CRs from a CRLF checkout.
+        if cmd[2] != "s/\\r$//":
+            return err(f"fake wsl: unexpected sed expression {cmd[2]!r}\n", 127)
+        data = open(m(cmd[3]), "rb").read().replace(b"\r\n", b"\n")
+        open(m(cmd[3]), "wb").write(data)
+        return out("")
     if cmd[:2] == ["rm", "-f"]:
         try:
             os.remove(m(cmd[2]))
@@ -181,12 +220,19 @@ def fake_wsl(argv, env):
             pass
         return out("")
     if cmd[:1] == ["bash"] and len(cmd) == 2:
-        child = {"PATH": os.path.join(HERE, "stubs") + ":/usr/bin:/bin", "HOME": "/root",
+        if ON_WINDOWS:  # Git Bash; it converts this Windows-style PATH itself
+            git_usr = os.path.join(os.path.dirname(os.path.dirname(E2E_BASH)), "usr", "bin")
+            path = os.path.join(HERE, "stubs") + ";" + git_usr
+        else:
+            path = os.path.join(HERE, "stubs") + ":/usr/bin:/bin"
+        child = {"PATH": path, "HOME": "/root",
                  "E2E_ROOT": root,
                  "WSL_CONF_FILE": m("/etc/wsl.conf"),
                  "WSL_SUDOERS_DIR": m("/etc/sudoers.d")}
         child.update(fwd)
-        r = subprocess.run(["bash", m(cmd[1])], env=child, capture_output=True)
+        if ON_WINDOWS:
+            child["SYSTEMROOT"] = os.environ.get("SYSTEMROOT", r"C:\\Windows")
+        r = subprocess.run([E2E_BASH, m(cmd[1])], env=child, capture_output=True)
         return r.stdout, r.stderr, r.returncode
     return err(f"fake wsl: unsupported command {cmd!r}\n", 127)
 

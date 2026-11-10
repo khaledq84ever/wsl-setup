@@ -134,7 +134,7 @@ run_scenario happy '{"installed":[],"online":"utf16"}' "[
   [$MENU, \"6\"],
   [$USER, \"Dev\"], [$USER, \"dev\"],
   [\"@PASSWORD\", \"abc\nabd\"], [\"@PASSWORD\", $PWJ],
-  [\"Registration complete.\", \"\"], [$DEV, \"n\"], [$AGAIN, \"n\"], [\"Done.\", \"\"]]"
+  [\"Registration complete.\", null], [$KEY, \"\"], [$DEV, \"n\"], [$AGAIN, \"n\"], [\"Done.\", null], [$KEY, \"\"]]"
 has '"99" is not a valid option.'
 has '"1&echo INJECTED" is not a valid option.'
 hasnt 'INJECTED'
@@ -158,7 +158,7 @@ end_scenario
 echo "=== E2E 2: re-run on an already-installed distro (menu 2 -> Debian) ==="
 run_scenario rerun '{"installed":["Debian"],"online":"utf16"}' "[
   [$MENU, \"2\"], [$USER, \"dev\"], [\"@PASSWORD\", $PWJ],
-  [\"Registration complete.\", \"\"], [$DEV, \"n\"], [$AGAIN, \"n\"], [\"Done.\", \"\"]]"
+  [\"Registration complete.\", null], [$KEY, \"\"], [$DEV, \"n\"], [$AGAIN, \"n\"], [\"Done.\", null], [$KEY, \"\"]]"
 has 'Debian GNU/Linux is already installed - skipping install,'
 [ -z "$(calls installs)" ] && ok || bad "re-run tried to install [$(calls installs)]"
 [ "$(cat "$ST/root-Debian/chpasswd.log" 2>/dev/null)" = "dev:$PW" ] && ok || bad "re-run chpasswd [$(cat "$ST/root-Debian/chpasswd.log" 2>/dev/null)]"
@@ -168,9 +168,9 @@ end_scenario
 
 echo "=== E2E 3: online list unavailable -> fallback menu, 1 -> Ubuntu ==="
 run_scenario offline '{"installed":[],"online":"fail"}' "[
-  [\"Could not read the live distro list\", \"\"],
+  [\"Could not read the live distro list\", null], [$KEY, \"\"],
   [$MENU, \"1\"], [$USER, \"dev\"], [\"@PASSWORD\", $PWJ],
-  [\"Registration complete.\", \"\"], [$DEV, \"n\"], [$AGAIN, \"n\"], [\"Done.\", \"\"]]"
+  [\"Registration complete.\", null], [$KEY, \"\"], [$DEV, \"n\"], [$AGAIN, \"n\"], [\"Done.\", null], [$KEY, \"\"]]"
 has 'WININET_E_NAME_NOT_RESOLVED'
 has 'Selected: Ubuntu - latest LTS   [wsl.exe --install -d Ubuntu]'
 [ "$(calls installs)" = "Ubuntu" ] && ok || bad "installed [$(calls installs)], want Ubuntu"
@@ -181,9 +181,9 @@ end_scenario
 echo "=== E2E 4: install another - second distro, list fetched only once ==="
 run_scenario another '{"installed":[],"online":"utf8"}' "[
   [$MENU, \"4\"], [$USER, \"dev\"], [\"@PASSWORD\", $PWJ],
-  [\"Registration complete.\", \"\"], [$DEV, \"n\"], [$AGAIN, \"y\"],
+  [\"Registration complete.\", null], [$KEY, \"\"], [$DEV, \"n\"], [$AGAIN, \"y\"],
   [$MENU, \"2\"], [$USER, \"ops\"], [\"@PASSWORD\", $PWJ],
-  [\"Registration complete.\", \"\"], [$DEV, \"n\"], [$AGAIN, \"n\"], [\"Done.\", \"\"]]"
+  [\"Registration complete.\", null], [$KEY, \"\"], [$DEV, \"n\"], [$AGAIN, \"n\"], [\"Done.\", null], [$KEY, \"\"]]"
 [ "$(calls installs)" = "Ubuntu Debian" ] && ok || bad "installed [$(calls installs)], want 'Ubuntu Debian'"
 n=$(grep -c '"--list", "--online"' "$ST/calls.jsonl" || true)
 [ "$n" = "1" ] && ok || bad "online list fetched $n times, want 1"
