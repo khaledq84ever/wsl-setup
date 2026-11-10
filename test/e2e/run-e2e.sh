@@ -41,6 +41,13 @@ if [ ! -d "$WINEPREFIX/drive_c" ]; then
     echo "--- creating Wine prefix (first run only, slow) ---"
     "$WINE" wineboot -i >/dev/null 2>&1 || true
 fi
+# Ubuntu's PE user32.dll imports zlib1.dll, which Wine only loads from the
+# prefix's system32 - copy it there if the distro ships it elsewhere.
+for z in /usr/x86_64-w64-mingw32/lib/zlib1.dll "$HOME/opt/wine/usr/x86_64-w64-mingw32/lib/zlib1.dll"; do
+    if [ -f "$z" ] && [ -d "$WINEPREFIX/drive_c/windows/system32" ] && [ ! -f "$WINEPREFIX/drive_c/windows/system32/zlib1.dll" ]; then
+        cp "$z" "$WINEPREFIX/drive_c/windows/system32/"
+    fi
+done
 
 # shellcheck disable=SC1003  # '\\' is a literal backslash for tr, not an escape attempt
 winpath() { printf 'Z:%s' "$1" | tr / '\\'; }

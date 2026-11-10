@@ -199,8 +199,9 @@ for i in $(seq 1 "$ITER"); do
 done
 
 # ---- the PowerShell embedded in wsl-setup.bat (needs pwsh; skipped if absent) ----
-PWSH_BIN="${PWSH:-$(command -v pwsh || true)}"
-if [ -n "$PWSH_BIN" ] && [ -x "$PWSH_BIN" ]; then
+# PWSH may be a path or a command name; resolve either.
+PWSH_BIN=$(command -v "${PWSH:-pwsh}" 2>/dev/null || true)
+if [ -n "$PWSH_BIN" ]; then
     for t in bat-powershell.ps1 list-distros.tests.ps1 install-wait.tests.ps1; do
         if "$PWSH_BIN" -NoProfile -File "$HERE/$t"; then ok; else bad "$t reported failures (see above)"; fi
     done
