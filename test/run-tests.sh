@@ -122,6 +122,21 @@ for i in $(seq 1 "$ITER"); do
     fi
 done
 
+echo "=== WAY 4: existing [user] section with no default= key, ${ITER}x ==="
+for i in $(seq 1 "$ITER"); do
+    wd="$WORKROOT/w4_$i"; mkdir -p "$wd"
+    u=$(pick_user "$i")
+    printf '[boot]\nsystemd=true\n[user]\n' > "$wd/wsl.conf"   # [user] present, no default=
+    run_setup_user "$wd" "$u" >/dev/null 2>&1
+    # default must be inserted under [user]; systemd kept; no duplicate [user]
+    if grep -qx 'systemd=true' "$wd/wsl.conf" \
+       && [ "$(grep -c '^\[user\]' "$wd/wsl.conf")" = "1" ]; then
+        check_common "$wd" "$u" "way4#$i"
+    else
+        bad "way4#$i: [user]-without-default handled wrong"
+    fi
+done
+
 # ---- setup-dev-tools.sh wsl.conf logic (REPLICA + drift check) ----
 echo "=== DRIFT CHECK: replica matches shipped setup-dev-tools.sh ==="
 if grep -Fq "sed -i '/^\[boot\]/a systemd=true'" "$REPO/setup-dev-tools.sh" \
