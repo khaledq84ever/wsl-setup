@@ -5,3 +5,9 @@
 # This matters because README tells users to run `bash setup-dev-tools.sh`
 # directly, which bypasses the CR-stripping that wsl-setup.bat does.
 *.sh text eol=lf
+
+# Batch files must be CRLF. cmd.exe mis-parses LF-only .bat files: goto/call
+# can fail to find a :label that is plainly there (its label scan breaks across
+# 512-byte read boundaries). git archive - and so GitHub's "Download ZIP" -
+# applies this too, so downloads get CRLF as well as Windows clones.
+*.bat text eol=crlf

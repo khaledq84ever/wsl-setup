@@ -12,6 +12,10 @@ REM is piped/redirected (which it always is under `for /f`) - without this,
 REM parsing wsl.exe output in batch silently returns garbage.
 set "WSL_UTF8=1"
 
+REM  Remember any WSLENV the user already had, so the credential forwarding
+REM  below can be added on top of it and then removed again cleanly.
+set "origWSLENV=%WSLENV%"
+
 REM --- ANSI colors (modern Windows Terminal / conhost both support this
 REM     natively - no registry tweak needed on Win10 1909+/Win11). Falls
 REM     back to harmless raw escape-looking text on truly ancient consoles.
@@ -27,7 +31,15 @@ REM --- Self-elevate to Administrator ---
 net session >nul 2>&1
 if not "%errorlevel%"=="0" (
     echo This tool needs Administrator rights. Requesting elevation...
-    powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
+    powershell -NoProfile -Command "try { Start-Process -FilePath '%~f0' -Verb RunAs -ErrorAction Stop } catch { exit 1 }"
+    if errorlevel 1 (
+        echo.
+        echo %CLR_RED%[ERROR]%CLR_RESET% Administrator rights were not granted - nothing was changed.
+        echo         Re-run it and click "Yes" on the UAC prompt, or right-click
+        echo         wsl-setup.bat and choose "Run as administrator".
+        echo.
+        pause
+    )
     exit /b
 )
 
@@ -48,6 +60,9 @@ if !winBuild! LSS 19041 (
 )
 
 :MENU
+REM  The distro list only needs fetching once per run - error paths and
+REM  "install another" come back here, and wsl.exe --list --online is slow.
+if defined DISTROCOUNT goto SHOWMENU
 cls
 echo %CLR_CYAN%=========================================================%CLR_RESET%
 echo                 %CLR_BOLD%%CLR_CYAN%WSL AUTO SETUP%CLR_RESET%
@@ -103,6 +118,7 @@ if "!DISTROCOUNT!"=="0" (
 )
 del "!onlineLog!" >nul 2>&1
 
+:SHOWMENU
 cls
 echo %CLR_CYAN%=========================================================%CLR_RESET%
 echo                 %CLR_BOLD%%CLR_CYAN%WSL AUTO SETUP%CLR_RESET%
@@ -151,18 +167,17 @@ echo   Set up the Linux account now - it will be created
 echo   automatically, no need to type anything during install.
 echo.
 
+:ASKUSER
 set "wslUser="
 set /p wslUser="  New Linux username: "
 if "!wslUser!"=="" (
     echo %CLR_RED%[ERROR]%CLR_RESET% Username cannot be empty.
-    pause
-    goto MENU
+    goto ASKUSER
 )
 if /i "!wslUser!"=="root" (
     echo %CLR_RED%[ERROR]%CLR_RESET% "root" already exists in every distro - pick a different,
     echo         new username so a real account actually gets created.
-    pause
-    goto MENU
+    goto ASKUSER
 )
 
 REM  Validate the username against Linux useradd rules BEFORE installing a whole
@@ -176,29 +191,48 @@ if errorlevel 1 (
     echo %CLR_RED%[ERROR]%CLR_RESET% "!wslUser!" is not a valid Linux username.
     echo         Use only lowercase letters, digits, hyphen and underscore, and
     echo         start with a lowercase letter or underscore ^(e.g. "dev", "my_user"^).
-    pause
-    goto MENU
+    goto ASKUSER
 )
 if not "!wslUser:~32!"=="" (
     echo %CLR_RED%[ERROR]%CLR_RESET% Username is too long - Linux usernames are max 32 characters.
-    pause
-    goto MENU
+    goto ASKUSER
 )
 
-for /f "usebackq delims=" %%p in (`powershell -NoProfile -Command "$s = Read-Host -AsSecureString '  New Linux password'; $b = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($s); [Runtime.InteropServices.Marshal]::PtrToStringAuto($b)"`) do set "wslPass=%%p"
+REM  The password is read, confirmed and base64-encoded entirely inside
+REM  PowerShell - only the base64 text ever comes back into this script.
+REM  Passing the raw password through `set` would corrupt it: with delayed
+REM  expansion on, cmd silently strips every "!" (and carets next to it), so
+REM  a password like "Pass!word" would end up as something the user never
+REM  typed. Base64 has no cmd-special characters. "ERR:" can never be valid
+REM  base64 output, so it is safe to use as an error marker.
+:ASKPASS
+set "PASS_B64="
+for /f "usebackq delims=" %%p in (`powershell -NoProfile -Command "$a = Read-Host -AsSecureString '  New Linux password'; $b = Read-Host -AsSecureString '  Confirm password'; $p1 = [Net.NetworkCredential]::new('', $a).Password; $p2 = [Net.NetworkCredential]::new('', $b).Password; if ($p1.Length -eq 0) { 'ERR:EMPTY' } elseif ($p1 -cne $p2) { 'ERR:MISMATCH' } else { [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($p1)) }"`) do set "PASS_B64=%%p"
 
-if "!wslPass!"=="" (
+if "!PASS_B64!"=="ERR:EMPTY" (
     echo %CLR_RED%[ERROR]%CLR_RESET% Password cannot be empty.
+    goto ASKPASS
+)
+if "!PASS_B64!"=="ERR:MISMATCH" (
+    echo %CLR_RED%[ERROR]%CLR_RESET% The passwords did not match - try again.
+    goto ASKPASS
+)
+if "!PASS_B64!"=="" (
+    echo %CLR_RED%[ERROR]%CLR_RESET% Could not read the password via PowerShell.
     pause
     goto MENU
 )
 
 echo.
 echo Checking whether !selectedFriendly! is already installed ...
+REM  Ask the registry instead of parsing `wsl.exe -l -q`: older wsl.exe builds
+REM  ignore WSL_UTF8 and print UTF-16, which `for /f` reads as garbage, so the
+REM  check silently said "not installed" and a re-run then died trying to
+REM  install a distro that already exists. Every registered distro has a
+REM  DistributionName value under this key; the lookup is case-insensitive.
 set "alreadyInstalled=0"
-for /f "usebackq delims=" %%a in (`wsl.exe -l -q`) do (
-    if /i "%%a"=="!selectedName!" set "alreadyInstalled=1"
-)
+powershell -NoProfile -Command "$n = '!selectedName!'; $hit = Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss' -ErrorAction SilentlyContinue | Where-Object { $_.GetValue('DistributionName') -eq $n }; if ($hit) { exit 0 } else { exit 1 }"
+if "!errorlevel!"=="0" set "alreadyInstalled=1"
 
 if "!alreadyInstalled!"=="1" (
     echo !selectedFriendly! is already installed - skipping install,
@@ -247,7 +281,7 @@ if "!alreadyInstalled!"=="1" (
         type "!installLog!" 2>nul
         type "!installErrLog!" 2>nul
         del "!installLog!" "!installErrLog!" >nul 2>&1
-        set "wslPass="
+        call :CLEARCREDS
         pause
         goto MENU
     )
@@ -292,7 +326,7 @@ if "!waitResult!"=="2" (
     echo         finish starting until you reboot. Restart your PC, then run
     echo         this tool again and pick the same option - it will pick up
     echo         where it left off.
-    set "wslPass="
+    call :CLEARCREDS
     pause
     goto MENU
 )
@@ -302,7 +336,7 @@ echo         Try launching it manually first: wsl -d !selectedName!
 echo         If that also hangs, Windows may need a restart to finish
 echo         enabling WSL. Restart your PC, then run this tool again
 echo         and pick the same option - it will pick up where it left off.
-set "wslPass="
+call :CLEARCREDS
 pause
 goto MENU
 
@@ -320,16 +354,19 @@ REM  shipped setup-user.sh, which is executed as `bash <path>` instead.
 if not exist "%~dp0setup-user.sh" (
     echo %CLR_RED%[ERROR]%CLR_RESET% setup-user.sh is missing next to this script.
     echo         Download the whole repo, not just wsl-setup.bat, then re-run.
-    set "wslPass="
+    call :CLEARCREDS
     pause
     goto MENU
 )
 
 set "WSL_SETUP_USER_RAW=!wslUser!"
-set "WSL_SETUP_PASS_RAW=!wslPass!"
 for /f "usebackq delims=" %%B in (`powershell -NoProfile -Command "[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($env:WSL_SETUP_USER_RAW))"`) do set "USER_B64=%%B"
-for /f "usebackq delims=" %%B in (`powershell -NoProfile -Command "[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($env:WSL_SETUP_PASS_RAW))"`) do set "PASS_B64=%%B"
-set "WSLENV=USER_B64:PASS_B64"
+set "WSL_SETUP_USER_RAW="
+if defined origWSLENV (
+    set "WSLENV=USER_B64:PASS_B64:!origWSLENV!"
+) else (
+    set "WSLENV=USER_B64:PASS_B64"
+)
 
 REM  Copy the shipped setup-user.sh into the distro, strip any CR (a CRLF
 REM  checkout on Windows would otherwise break bash parsing), and run it as
@@ -343,15 +380,17 @@ wsl.exe -d !selectedName! -u root -- bash /tmp/wsl_setup_user.sh
 set "userScriptResult=!errorlevel!"
 wsl.exe -d !selectedName! -u root -- rm -f /tmp/wsl_setup_user.sh >nul 2>&1
 
+REM  Stop forwarding the credentials NOW. Otherwise every later wsl.exe call in
+REM  this window - including setup-dev-tools.sh, which pipes installers from
+REM  the internet into a shell - would still receive PASS_B64 in its env.
+call :CLEARCREDS
+
 if not "!userScriptResult!"=="0" (
     echo %CLR_RED%[ERROR]%CLR_RESET% Creating the Linux user failed inside !selectedFriendly!. See output above.
     set "wslUser="
-    set "wslPass="
     pause
     goto MENU
 )
-
-set "wslPass="
 
 echo Restarting !selectedFriendly! so the new default user takes effect ...
 wsl.exe --terminate !selectedName! >nul 2>&1
@@ -405,7 +444,6 @@ if /i "!cleanCheck!"=="!wslUser!" (
 )
 
 set "wslUser="
-set "wslPass="
 
 echo Creating start-wsl.bat next to this script for quick launching ...
 (
@@ -459,6 +497,7 @@ if exist "%~dp0setup-dev-tools.sh" (
 
 :ASKAGAIN
 echo.
+set "again="
 set /p again="Install another distribution? (y/n): "
 if /i "!again!"=="y" goto MENU
 goto END
@@ -470,3 +509,11 @@ echo   Done.
 echo %CLR_CYAN%=========================================================%CLR_RESET%
 echo.
 pause
+exit /b
+
+REM --- Drop the base64 credentials and restore the caller's WSLENV ---
+:CLEARCREDS
+set "PASS_B64="
+set "USER_B64="
+set "WSLENV=!origWSLENV!"
+exit /b
