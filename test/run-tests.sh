@@ -201,11 +201,18 @@ done
 # ---- the PowerShell embedded in wsl-setup.bat (needs pwsh; skipped if absent) ----
 PWSH_BIN="${PWSH:-$(command -v pwsh || true)}"
 if [ -n "$PWSH_BIN" ] && [ -x "$PWSH_BIN" ]; then
-    for t in bat-powershell.ps1 list-distros.tests.ps1; do
+    for t in bat-powershell.ps1 list-distros.tests.ps1 install-wait.tests.ps1; do
         if "$PWSH_BIN" -NoProfile -File "$HERE/$t"; then ok; else bad "$t reported failures (see above)"; fi
     done
 else
     echo "=== PS checks SKIPPED: pwsh not found (set PWSH=/path/to/pwsh to run them) ==="
+fi
+
+# ---- full end-to-end run of wsl-setup.bat under Wine (opt-in: slow) ----
+if [ -n "${E2E:-}" ]; then
+    if bash "$HERE/e2e/run-e2e.sh"; then ok; else bad "e2e/run-e2e.sh reported failures (see above)"; fi
+else
+    echo "=== E2E SKIPPED: set E2E=1 (needs wine, a MinGW gcc and pwsh) ==="
 fi
 
 echo

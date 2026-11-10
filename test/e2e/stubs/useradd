@@ -1,0 +1,4 @@
+#!/bin/sh
+# records the new user (last argument) in the fake distro's passwd
+for a; do u=$a; done
+echo "$u" >> "$E2E_ROOT/etc/passwd"

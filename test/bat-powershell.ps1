@@ -1,9 +1,9 @@
 # bat-powershell.ps1 - test the PowerShell that wsl-setup.bat runs, without Windows.
 #
 # Runs under PowerShell 7 on Linux (pwsh). It:
-#   1. extracts every `powershell -NoProfile -Command "..."` string from the .bat,
-#      plus the .ps1 scripts the .bat writes out line by line with `echo`
-#      (undoing cmd's ^ escapes and %% doubling), and parses all of them;
+#   1. extracts every `powershell -NoProfile -Command "..."` string from the .bat
+#      (and any script it writes out with `echo`, undoing ^ escapes and %%),
+#      plus the shipped *.ps1 files, and parses all of them;
 #   2. runs the real :MATCHRE helper against valid/invalid usernames and menu
 #      choices, including cmd-special characters;
 #   3. runs the real password snippet (Read-Host swapped for a test SecureString)
@@ -44,7 +44,9 @@ for ($i = 0; $i -lt $lines.Count - 1; $i++) {
 }
 
 Write-Host "=== PS PARSE: $($snippets.Count) PowerShell snippets from wsl-setup.bat ==="
-if ($snippets.Count -lt 8) { Bad "expected at least 8 snippets, found $($snippets.Count) - extractor out of date?" }
+if ($snippets.Count -lt 6) { Bad "expected at least 6 snippets, found $($snippets.Count) - extractor out of date?" }
+# ...and the PowerShell files shipped next to the .bat.
+foreach ($f in Get-ChildItem (Split-Path $Bat) -Filter *.ps1) { $snippets["file $($f.Name)"] = Get-Content -Raw $f.FullName }
 foreach ($k in $snippets.Keys) {
     $err = $null
     [void][System.Management.Automation.Language.Parser]::ParseInput($snippets[$k], [ref]$null, [ref]$err)
@@ -70,7 +72,8 @@ function Test-Match($re, $val, $want) {
 $userRe   = ([regex]::Match(($lines -join "`n"), 'set "CHK_RE=(\^\[a-z_\][^"]*)"')).Groups[1].Value
 $choiceRe = ([regex]::Match(($lines -join "`n"), 'set "CHK_RE=(\^\[1-9\][^"]*)"')).Groups[1].Value
 if (-not $userRe -or -not $choiceRe) { Bad 'could not find the CHK_RE patterns in the .bat' }
-foreach ($v in 'dev', 'my_user', '_x', 'a-b', 'x1') { Test-Match $userRe $v 0 }
+foreach ($v in 'dev', 'my_user', '_x', 'a-b', 'x1', ('a' * 32)) { Test-Match $userRe $v 0 }
+Test-Match $userRe ('a' * 33) 1   # Linux max is 32
 foreach ($v in 'Dev', 'DEV', 'Zed', 'dEv', 'devX', '1abc', 'dev&calc', 'dev|x', '', 'dév', 'a b', 'dev!', 'de^v', '%x%', '"q"', "dev`nx") {
     Test-Match $userRe $v 1
 }

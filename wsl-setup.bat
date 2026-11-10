@@ -68,6 +68,21 @@ if !winBuild! LSS 19041 (
     exit /b
 )
 
+REM --- The helper files must sit next to this script. Check them all up
+REM     front, so a partial download fails here with a clear list instead of
+REM     halfway through an install.
+set "missing="
+for %%F in (setup-user.sh list-distros.ps1 install-distro.ps1 wait-distro.ps1) do (
+    if not exist "%~dp0%%F" set "missing=!missing! %%F"
+)
+if defined missing (
+    echo %CLR_RED%[ERROR]%CLR_RESET% These files are missing next to wsl-setup.bat:!missing!
+    echo         Download the whole repo - not just the .bat - and run it again.
+    echo.
+    pause
+    exit /b 1
+)
+
 :MENU
 REM  The distro list only needs fetching once per run - error paths and
 REM  "install another" come back here, and wsl.exe --list --online is slow.
@@ -90,18 +105,12 @@ REM  decodes the raw bytes, copes with any intro length or language, and
 REM  prints NAME^|FRIENDLY lines. If it finds nothing, it shows what wsl.exe
 REM  said on stderr, which for /f does not capture.
 set "DISTROCOUNT=0"
-if not exist "%~dp0list-distros.ps1" (
-    echo.
-    echo %CLR_YELLOW%[WARN]%CLR_RESET% list-distros.ps1 is missing next to this script.
-    goto DISTROFALLBACK
-)
 for /f "usebackq tokens=1,* delims=|" %%D in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0list-distros.ps1"`) do (
     set /a DISTROCOUNT+=1
     set "DISTRONAME_!DISTROCOUNT!=%%D"
     set "DISTROFRIENDLY_!DISTROCOUNT!=%%E"
 )
 
-:DISTROFALLBACK
 REM  The live list can legitimately fail (no internet/DNS, or wsl.exe not
 REM  fully initialized yet on a brand-new machine - exactly when this tool
 REM  is most likely to be run). Rather than dying here, fall back to a
@@ -195,16 +204,13 @@ REM  (see :MATCHRE) - not `echo ... | findstr`: findstr's [a-z] also matches
 REM  most UPPERCASE letters, and the left side of a cmd pipe runs with delayed
 REM  expansion off, so the value may not even reach findstr intact.
 set "CHK_VAL=!wslUser!"
-set "CHK_RE=^[a-z_][a-z0-9_-]*$"
+set "CHK_RE=^[a-z_][a-z0-9_-]{0,31}$"
 call :MATCHRE
 if errorlevel 1 (
     echo %CLR_RED%[ERROR]%CLR_RESET% "!wslUser!" is not a valid Linux username.
     echo         Use only lowercase letters, digits, hyphen and underscore, and
-    echo         start with a lowercase letter or underscore ^(e.g. "dev", "my_user"^).
-    goto ASKUSER
-)
-if not "!wslUser:~32!"=="" (
-    echo %CLR_RED%[ERROR]%CLR_RESET% Username is too long - Linux usernames are max 32 characters.
+    echo         start with a lowercase letter or underscore, max 32 characters
+    echo         ^(e.g. "dev", "my_user"^).
     goto ASKUSER
 )
 
@@ -252,50 +258,20 @@ if "!alreadyInstalled!"=="1" (
     echo ^(--web-download is used to avoid a known WSL bug where install
     echo   can hang at 0.0%% - see Microsoft's WSL install docs^)
 
-    set "installLog=%TEMP%\wsl_setup_install.log"
-    set "installErrLog=%TEMP%\wsl_setup_install_err.log"
-    set "installScript=%TEMP%\wsl_setup_install_progress.ps1"
-    if exist "!installLog!" del "!installLog!" >nul 2>&1
-    if exist "!installErrLog!" del "!installErrLog!" >nul 2>&1
-    (
-    echo $proc = Start-Process -FilePath 'wsl.exe' -ArgumentList '--install','-d','!selectedName!','--no-launch','--web-download' -RedirectStandardOutput '!installLog!' -RedirectStandardError '!installErrLog!' -PassThru -NoNewWindow
-    echo $spinner = @^('^|','/','-','\'^)
-    echo $i = 0
-    echo while ^(-not $proc.HasExited^) {
-    echo     $elapsed = [Math]::Round^(^(^(Get-Date^) - $proc.StartTime^).TotalSeconds^)
-    echo     $pct = -1
-    echo     if ^(Test-Path '!installLog!'^) {
-    echo         $lastLine = Get-Content '!installLog!' -Tail 5 -ErrorAction SilentlyContinue ^| Where-Object { $_ -match '[\d.]+%%' } ^| Select-Object -Last 1
-    echo         if ^($lastLine -match '[\d.]+%%'^) { $pct = [Math]::Min^(100, [double]^($Matches[0].TrimEnd^('%%'^)^)^) }
-    echo     }
-    echo     if ^($pct -ge 0^) {
-    echo         Write-Progress -Activity "Downloading !selectedFriendly!" -Status "$pct%% - ${elapsed}s elapsed" -PercentComplete $pct
-    echo     } else {
-    echo         Write-Progress -Activity "Downloading !selectedFriendly!" -Status "$^($spinner[$i %% 4]^)  ${elapsed}s elapsed ^(waiting for progress data^)" -PercentComplete -1
-    echo     }
-    echo     $i++
-    echo     Start-Sleep -Milliseconds 300
-    echo }
-    echo Write-Progress -Activity done -Completed
-    echo exit $proc.ExitCode
-    ) > "!installScript!"
-    powershell -NoProfile -ExecutionPolicy Bypass -File "!installScript!"
+    REM  install-distro.ps1 shows a progress bar, returns wsl.exe's exit
+    REM  code, and prints wsl.exe's output itself if the install fails.
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install-distro.ps1" -Distro "!selectedName!" -Friendly "!selectedFriendly!"
     set "installResult=!errorlevel!"
-    del "!installScript!" >nul 2>&1
 
     if not "!installResult!"=="0" (
-        echo %CLR_RED%[ERROR]%CLR_RESET% wsl.exe --install failed for "!selectedName!".
+        echo %CLR_RED%[ERROR]%CLR_RESET% wsl.exe --install failed for "!selectedName!" - output above.
         echo         If this is the very first WSL install on this PC, Windows
         echo         may need a restart to finish enabling WSL. Restart, then
-        echo         run this tool again. Details:
-        type "!installLog!" 2>nul
-        type "!installErrLog!" 2>nul
-        del "!installLog!" "!installErrLog!" >nul 2>&1
+        echo         run this tool again.
         call :CLEARCREDS
         pause
         goto MENU
     )
-    del "!installLog!" "!installErrLog!" >nul 2>&1
 )
 
 echo.
@@ -303,29 +279,7 @@ echo Waiting for !selectedFriendly! to finish initializing ...
 echo ^(a first-ever WSL launch on this PC can take several minutes -
 echo   it is extracting and booting the distro for the first time^)
 
-set "waitScript=%TEMP%\wsl_wait_progress.ps1"
-(
-    echo param^([string]$DistroName^)
-    echo $rebootKeys = @^(
-    echo     'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending',
-    echo     'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\PendingFileRenameOperations'
-    echo ^)
-    echo for ^($i = 0; $i -lt 60; $i++^) {
-    echo     $elapsed = $i * 5
-    echo     $pct = [Math]::Min^(100, [Math]::Round^($elapsed / 300 * 100^)^)
-    echo     Write-Progress -Activity "Waiting for $DistroName to finish initializing" -Status "$elapsed sec / 300 sec (first-time boot can take a while)" -PercentComplete $pct
-    echo     ^& wsl.exe -d $DistroName -u root -- true 2^>$null
-    echo     if ^($LASTEXITCODE -eq 0^) { Write-Progress -Activity done -Completed; exit 0 }
-    echo     foreach ^($k in $rebootKeys^) {
-    echo         if ^(Test-Path $k^) { Write-Progress -Activity done -Completed; exit 2 }
-    echo     }
-    echo     Start-Sleep -Seconds 5
-    echo }
-    echo Write-Progress -Activity done -Completed
-    echo exit 1
-) > "!waitScript!"
-
-powershell -NoProfile -ExecutionPolicy Bypass -File "!waitScript!" -DistroName "!selectedName!"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0wait-distro.ps1" -Distro "!selectedName!"
 set "waitResult=!errorlevel!"
 
 if "!waitResult!"=="0" goto READY
@@ -361,28 +315,16 @@ REM  commands and never reaches bash intact. The username/password are
 REM  also never spliced as raw text into any parsed command line: they're
 REM  base64-encoded and forwarded through WSLENV, then decoded inside the
 REM  shipped setup-user.sh, which is executed as `bash <path>` instead.
-if not exist "%~dp0setup-user.sh" (
-    echo %CLR_RED%[ERROR]%CLR_RESET% setup-user.sh is missing next to this script.
-    echo         Download the whole repo, not just wsl-setup.bat, then re-run.
-    call :CLEARCREDS
-    pause
-    goto MENU
-)
 
 set "WSL_SETUP_USER_RAW=!wslUser!"
 set "USER_B64="
 for /f "usebackq delims=" %%B in (`powershell -NoProfile -Command "[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($env:WSL_SETUP_USER_RAW))"`) do set "USER_B64=%%B"
 set "WSL_SETUP_USER_RAW="
-if defined origWSLENV (
-    set "WSLENV=USER_B64:PASS_B64:!origWSLENV!"
-) else (
-    set "WSLENV=USER_B64:PASS_B64"
-)
 
 REM  Copy the shipped setup-user.sh into the distro, strip any CR (a CRLF
 REM  checkout on Windows would otherwise break bash parsing), and run it as
-REM  root. It reads USER_B64/PASS_B64 from the environment, forwarded above via
-REM  WSLENV. Running `bash <path>` with no shell metacharacters on the command
+REM  root. It reads USER_B64/PASS_B64 from the environment, forwarded via
+REM  WSLENV for that one call only. Running `bash <path>` with no shell metacharacters on the command
 REM  line avoids cmd.exe mangling a pipe, redirect, or && even inside quotes.
 REM  Every value captured with `for /f` below is cleared first: when nothing
 REM  comes back, `for /f` leaves the variable untouched, and on a second
@@ -400,14 +342,19 @@ if not defined SCRIPTWSL (
 )
 wsl.exe -d !selectedName! -u root -- cp "!SCRIPTWSL!" /tmp/wsl_setup_user.sh
 wsl.exe -d !selectedName! -u root -- sed -i "s/\r$//" /tmp/wsl_setup_user.sh
+REM  Forward the credentials into exactly this one call, then stop at once.
+REM  Otherwise every later wsl.exe call in this window - including
+REM  setup-dev-tools.sh, which pipes installers from the internet into a
+REM  shell - would still receive PASS_B64 in its environment.
+if defined origWSLENV (
+    set "WSLENV=USER_B64:PASS_B64:!origWSLENV!"
+) else (
+    set "WSLENV=USER_B64:PASS_B64"
+)
 wsl.exe -d !selectedName! -u root -- bash /tmp/wsl_setup_user.sh
 set "userScriptResult=!errorlevel!"
-wsl.exe -d !selectedName! -u root -- rm -f /tmp/wsl_setup_user.sh >nul 2>&1
-
-REM  Stop forwarding the credentials NOW. Otherwise every later wsl.exe call in
-REM  this window - including setup-dev-tools.sh, which pipes installers from
-REM  the internet into a shell - would still receive PASS_B64 in its env.
 call :CLEARCREDS
+wsl.exe -d !selectedName! -u root -- rm -f /tmp/wsl_setup_user.sh >nul 2>&1
 
 if not "!userScriptResult!"=="0" (
     echo %CLR_RED%[ERROR]%CLR_RESET% Creating the Linux user failed inside !selectedFriendly!. See output above.

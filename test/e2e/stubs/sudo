@@ -1,0 +1,3 @@
+#!/bin/sh
+# present so setup-user.sh does not try to install sudo
+exit 0
