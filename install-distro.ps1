@@ -23,8 +23,14 @@ $ErrorActionPreference = 'Stop'
 function Read-WslLog([string]$Path) {
     # wsl.exe may write UTF-16LE without a BOM; dropping the NULs turns its
     # ASCII text back into something readable either way.
+    # Always returns a [string]: on Windows PowerShell 5.1, Get-Content -Raw
+    # of a still-empty log returns $null, and $null -replace ... stays $null -
+    # which made [regex]::Matches throw on the very first progress poll and
+    # turned a running install into "install failed".
     if (-not (Test-Path -LiteralPath $Path)) { return '' }
-    try { (Get-Content -LiteralPath $Path -Raw -ErrorAction Stop) -replace "`0", '' } catch { '' }
+    try { $text = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop } catch { return '' }
+    if ($null -eq $text) { return '' }
+    return ([string]$text) -replace "`0", ''
 }
 
 $tmp = [IO.Path]::GetTempPath()
@@ -50,7 +56,7 @@ $started = Get-Date
 while (-not $proc.HasExited) {
     $elapsed = [Math]::Round(((Get-Date) - $started).TotalSeconds)
     $pct = -1
-    $all = [regex]::Matches((Read-WslLog $outLog), '(\d+(?:\.\d+)?)%')
+    $all = [regex]::Matches([string](Read-WslLog $outLog), '(\d+(?:\.\d+)?)%')
     if ($all.Count) { $pct = [Math]::Min(100, [double]$all[$all.Count - 1].Groups[1].Value) }
     if ($pct -ge 0) {
         Write-Progress -Activity "Downloading $Friendly" -Status "$pct% - ${elapsed}s elapsed" -PercentComplete $pct
