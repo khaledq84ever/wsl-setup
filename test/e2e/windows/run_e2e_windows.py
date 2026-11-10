@@ -235,7 +235,10 @@ def main():
         st, out = run_scenario("happy", {"installed": [], "online": "utf16"}, [
             [MENU, "99"], [KEY, ""], [MENU, "1&echo INJECTED"], [KEY, ""], [MENU, "6"],
             [USER, "Dev"], [USER, "dev"],
-            [PWD1, "abc"], [PWD2, "abd"], [PWD1, PW], [PWD2, PW]] + finish, work, bindir, bash)
+            [PWD1, "abc"], [PWD2, "abd"], [PWD1, PW], [PWD2, PW],
+            ["Registration complete.", None], [KEY, ""], [DEV, "y"],
+            ["Dev-tools setup finished.", None], [KEY, ""], [AGAIN, "n"], ["Done.", None], [KEY, ""]],
+            work, bindir, bash)
         before = failed
         # Real cmd.exe can print the menu (Wine cannot) - check it exactly.
         for line in ("1.  AlmaLinux OS 9", "6.  Ubuntu 24.04 LTS", "8.  Kali Linux Rolling", "0.  Exit"):
@@ -257,6 +260,9 @@ def main():
         for s in ('[OK] User "dev" is registered in Ubuntu 24.04 LTS.', '[OK] "dev" is set as the default user',
                   '[OK] Typing "wsl" in any cmd/PowerShell window now logs straight'):
             check(s in out, f"console lacks {s!r}")
+        dt = json.loads(read(os.path.join(st, "devtools.json")) or "{}")
+        check(dt == {"user": "dev", "same": True}, f"dev tools run {dt}, want user dev + identical script")
+        check("[OK] Dev-tools setup finished." in out, "dev tools OK line missing")
         if failed > before: shown.append(st)
 
         print("=== WIN E2E 2: re-run, Debian already registered (real registry lookup) ===", flush=True)
