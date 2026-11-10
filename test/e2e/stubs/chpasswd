@@ -1,0 +1,3 @@
+#!/bin/sh
+# keeps the exact user:password line so the test can check nothing was mangled
+cat >> "$E2E_ROOT/chpasswd.log"

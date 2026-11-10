@@ -1,0 +1,71 @@
+# install-wait.tests.ps1 - run the real install-distro.ps1 and wait-distro.ps1
+# against fake wsl.exe scripts. Linux/pwsh only (fakes are /bin/sh scripts).
+$ErrorActionPreference = 'Stop'
+$script:pass = 0; $script:fail = 0
+function Ok  { $script:pass++ }
+function Bad { param($m) $script:fail++; Write-Host "  FAIL: $m" }
+
+$root = Join-Path $PSScriptRoot '..'
+$install = Join-Path $root 'install-distro.ps1'
+$wait = Join-Path $root 'wait-distro.ps1'
+$pwshExe = (Get-Process -Id $PID).Path
+$tmp = Join-Path ([IO.Path]::GetTempPath()) ("instwait-" + [guid]::NewGuid())
+New-Item -ItemType Directory $tmp | Out-Null
+
+function New-Fake([string]$name, [string]$body) {
+    $f = Join-Path $tmp $name
+    Set-Content -Path $f -Value ("#!/bin/sh`n" + $body + "`n") -NoNewline
+    chmod +x $f
+    $f
+}
+function Run([string]$script, [string[]]$a) {
+    $out = & $pwshExe -NoProfile -File $script @a 2>&1 | Out-String
+    [pscustomobject]@{ Out = $out; Code = $LASTEXITCODE }
+}
+
+Write-Host '=== INSTALL-DISTRO ==='
+$argsFile = Join-Path $tmp 'install-args'
+$ok = New-Fake 'wsl-ok' "echo `"`$*`" > '$argsFile'; for p in 10.0 55.5 100.0; do echo `"Downloading: `$p%`"; sleep 0.2; done; exit 0"
+$r = Run $install @('-Distro', 'Ubuntu-24.04', '-Friendly', "Ubuntu 24.04 LTS (it's fine)", '-WslExe', $ok, '-PollMs', '50')
+if ($r.Code -eq 0) { Ok } else { Bad "success case: exit $($r.Code) [$($r.Out)]" }
+$got = (Get-Content -Raw $argsFile).Trim()
+if ($got -ceq '--install -d Ubuntu-24.04 --no-launch --web-download') { Ok } else { Bad "wsl.exe got [$got]" }
+
+# Failure, with the error written as UTF-16LE like an old wsl.exe would.
+$errFile = Join-Path $tmp 'err-utf16'
+[IO.File]::WriteAllBytes($errFile, [Text.Encoding]::Unicode.GetBytes("There is no distribution with the supplied name.`r`nError code: Wsl/InstallDistro/WSL_E_DISTRO_NOT_FOUND`r`n"))
+$bad = New-Fake 'wsl-bad' "cat '$errFile'; exit 5"
+$r = Run $install @('-Distro', 'Nope', '-WslExe', $bad, '-PollMs', '50')
+if ($r.Code -eq 5) { Ok } else { Bad "failure case: exit $($r.Code), want 5" }
+if ($r.Out -match 'WSL_E_DISTRO_NOT_FOUND') { Ok } else { Bad "failure output not shown/decoded: [$($r.Out)]" }
+
+# Exits before the first progress poll - must still report its real code.
+$fast = New-Fake 'wsl-fast' 'exit 3'
+$r = Run $install @('-Distro', 'X', '-WslExe', $fast, '-PollMs', '50')
+if ($r.Code -eq 3) { Ok } else { Bad "fast-exit case: exit $($r.Code), want 3" }
+
+$r = Run $install @('-Distro', 'X', '-WslExe', (Join-Path $tmp 'missing'))
+if ($r.Code -eq 1) { Ok } else { Bad "missing wsl.exe: exit $($r.Code), want 1" }
+
+Write-Host '=== WAIT-DISTRO ==='
+$count = Join-Path $tmp 'count'
+$waitArgs = Join-Path $tmp 'wait-args'
+$third = New-Fake 'wsl-third' "echo `"`$*`" > '$waitArgs'; n=`$(cat '$count' 2>/dev/null || echo 0); n=`$((n+1)); echo `$n > '$count'; [ `$n -ge 3 ]"
+$r = Run $wait @('-Distro', 'Debian', '-WslExe', $third, '-IntervalSec', '0.1', '-RebootKeys', (Join-Path $tmp 'no-such-key'))
+if ($r.Code -eq 0) { Ok } else { Bad "ready on 3rd try: exit $($r.Code)" }
+if ((Get-Content $count).Trim() -eq '3') { Ok } else { Bad "expected 3 attempts, got $(Get-Content $count)" }
+if ((Get-Content -Raw $waitArgs).Trim() -ceq '-d Debian -u root -- true') { Ok } else { Bad "wait args [$(Get-Content -Raw $waitArgs)]" }
+
+$never = New-Fake 'wsl-never' 'exit 1'
+$sw = [Diagnostics.Stopwatch]::StartNew()
+$r = Run $wait @('-Distro', 'Debian', '-WslExe', $never, '-TimeoutSec', '1', '-IntervalSec', '0.2', '-RebootKeys', (Join-Path $tmp 'no-such-key'))
+$sw.Stop()
+if ($r.Code -eq 1 -and $sw.Elapsed.TotalSeconds -lt 15) { Ok } else { Bad "timeout: exit $($r.Code) after $([int]$sw.Elapsed.TotalSeconds)s" }
+
+$key = Join-Path $tmp 'reboot-pending'; New-Item -ItemType File $key | Out-Null
+$r = Run $wait @('-Distro', 'Debian', '-WslExe', $never, '-IntervalSec', '0.1', '-RebootKeys', $key)
+if ($r.Code -eq 2) { Ok } else { Bad "reboot pending: exit $($r.Code), want 2" }
+
+Remove-Item -Recurse -Force $tmp
+Write-Host "INSTALL-WAIT RESULTS: $script:pass passed, $script:fail failed"
+exit ([int]($script:fail -ne 0))

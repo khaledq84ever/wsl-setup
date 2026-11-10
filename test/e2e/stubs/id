@@ -1,0 +1,4 @@
+#!/bin/sh
+# `id -u NAME`: exists iff useradd recorded it
+[ "$1" = "-u" ] && grep -qx "$2" "$E2E_ROOT/etc/passwd" 2>/dev/null && { echo 1000; exit 0; }
+exit 1

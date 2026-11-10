@@ -1,0 +1,3 @@
+#!/bin/sh
+# wsl.exe as seen by pwsh scripts the .bat runs (list-distros.ps1, install/wait scripts)
+exec python3 "$(dirname "$0")/../fake_windows.py" wsl "$@"
