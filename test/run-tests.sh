@@ -7,10 +7,9 @@
 #   * setup-user.sh is run FOR REAL (the actual shipped file), with useradd/
 #     chpasswd/usermod stubbed on PATH and /etc paths redirected to a temp dir
 #     via the WSL_CONF_FILE / WSL_SUDOERS_DIR overrides the script honours.
-#   * The setup-dev-tools.sh wsl.conf logic is tested via a REPLICA function
-#     (that script can't be sourced without running apt). A drift check asserts
-#     the replica still matches the real lines, so it fails loudly if the shipped
-#     logic changes.
+#   * setup-dev-tools.sh is SOURCED (its main body only runs when executed
+#     directly), and its real enable_systemd() is called on temp files with
+#     SUDO="" - no replica to drift out of sync.
 #
 # NOTE: wsl-setup.bat itself is NOT exercised here - it needs Windows + real WSL.
 # This harness covers the bash it runs inside the distro, which is where the
@@ -39,7 +38,10 @@ for t in useradd usermod; do
     printf '#!/bin/sh\nexit 0\n' > "$STUB/$t"
     chmod +x "$STUB/$t"
 done
-printf '#!/bin/sh\ncat >/dev/null 2>&1\nexit 0\n' > "$STUB/chpasswd"
+# It also records what it received, so the exact user:password line can be
+# asserted (catches any mangling of special characters on the way through).
+# shellcheck disable=SC2016  # $VAR is meant to expand inside the stub, not here
+printf '#!/bin/sh\ncat > "${CHPASSWD_LOG:-/dev/null}"\nexit 0\n' > "$STUB/chpasswd"
 chmod +x "$STUB/chpasswd"
 # `id -u <user>` decides create-vs-skip. Default: user missing (exit 1).
 cat > "$STUB/id" <<'EOF'
@@ -50,12 +52,15 @@ EOF
 chmod +x "$STUB/id"
 
 # Run the REAL setup-user.sh against a throwaway /etc. Args: workdir username
+# shellcheck disable=SC2016  # literal $(no): must reach chpasswd unexpanded
+TEST_PASS='P@ss :w/ord!^&%x%"q'"'"'$(no)'
 run_setup_user() {
     local wd="$1" user="$2"
     mkdir -p "$wd/sudoers.d"
     PATH="$STUB:$PATH" \
+    CHPASSWD_LOG="$wd/chpasswd.in" \
     USER_B64="$(printf '%s' "$user" | base64)" \
-    PASS_B64="$(printf '%s' 'P@ss :w/ord!' | base64)" \
+    PASS_B64="$(printf '%s' "$TEST_PASS" | base64 -w0)" \
     WSL_CONF_FILE="$wd/wsl.conf" \
     WSL_SUDOERS_DIR="$wd/sudoers.d" \
     bash "$REPO/setup-user.sh"
@@ -75,6 +80,7 @@ check_common() {
     grep -q '^\[user\]' "$wd/wsl.conf" || { bad "$ctx: [user] section missing"; return; }
     grep -qx "default=$user" "$wd/wsl.conf" || { bad "$ctx: default=$user missing"; return; }
     [ "$(grep -c '^default=' "$wd/wsl.conf")" = "1" ] || { bad "$ctx: not exactly one default= line"; return; }
+    [ "$(cat "$wd/chpasswd.in")" = "$user:$TEST_PASS" ] || { bad "$ctx: chpasswd got a mangled user:password line"; return; }
     ok
 }
 
@@ -137,28 +143,37 @@ for i in $(seq 1 "$ITER"); do
     fi
 done
 
-# ---- setup-dev-tools.sh wsl.conf logic (REPLICA + drift check) ----
-echo "=== DRIFT CHECK: replica matches shipped setup-dev-tools.sh ==="
-if grep -Fq "sed -i '/^\[boot\]/a systemd=true'" "$REPO/setup-dev-tools.sh" \
-   && grep -Fq "grep -q '^systemd=true'" "$REPO/setup-dev-tools.sh"; then
-    ok
-else
-    bad "DRIFT: setup-dev-tools.sh wsl.conf logic changed - update this replica"
-fi
-
-# Replica of setup-dev-tools.sh lines ~40-50, operating on an arbitrary file.
-dev_enable_systemd() {
-    local conf="$1"
-    if [ ! -f "$conf" ] || ! grep -q '^systemd=true' "$conf"; then
-        if [ -f "$conf" ] && grep -q '^\[boot\]' "$conf"; then
-            sed -i '/^\[boot\]/a systemd=true' "$conf"
-        else
-            printf '[boot]\nsystemd=true\n' >> "$conf"
-        fi
+echo "=== WAY 5: sudo missing -> installed via the distro package manager, ${ITER}x ==="
+# A stub apt-get records that it was asked to install sudo; WSL_SUDO_CMD points
+# the "is sudo installed?" probe at a name that cannot exist. Also removes the
+# sudoers.d dir up front to prove the script creates it.
+# shellcheck disable=SC2016
+printf '#!/bin/sh\necho "$*" >> "${APT_LOG:-/dev/null}"\nexit 0\n' > "$STUB/apt-get"
+chmod +x "$STUB/apt-get"
+for i in $(seq 1 "$ITER"); do
+    wd="$WORKROOT/w5_$i"; mkdir -p "$wd"
+    u=$(pick_user "$i")
+    mkdir -p "$wd/sudoers.d"; rmdir "$wd/sudoers.d"
+    PATH="$STUB:$PATH" CHPASSWD_LOG="$wd/chpasswd.in" APT_LOG="$wd/apt.log" \
+    WSL_SUDO_CMD="no-such-sudo-$i" \
+    USER_B64="$(printf '%s' "$u" | base64)" PASS_B64="$(printf '%s' "$TEST_PASS" | base64 -w0)" \
+    WSL_CONF_FILE="$wd/wsl.conf" WSL_SUDOERS_DIR="$wd/sudoers.d" \
+    bash "$REPO/setup-user.sh" >/dev/null 2>&1 || true
+    if grep -q 'install -y sudo' "$wd/apt.log" 2>/dev/null; then
+        check_common "$wd" "$u" "way5#$i"
+    else
+        bad "way5#$i: missing sudo was not installed"
     fi
-}
+done
+rm -f "$STUB/apt-get"
 
-echo "=== DEV WAYS: enable-systemd across 4 states, ${ITER}x each ==="
+# ---- setup-dev-tools.sh wsl.conf logic: the REAL function, sourced ----
+SUDO=""   # write directly - no sudo in the harness
+# shellcheck source=SCRIPTDIR/../setup-dev-tools.sh
+source "$REPO/setup-dev-tools.sh"
+dev_enable_systemd() { enable_systemd "$1" || true; }
+
+echo "=== DEV WAYS: enable-systemd across 7 states, ${ITER}x each ==="
 for i in $(seq 1 "$ITER"); do
     # a) no file
     f="$WORKROOT/d_a_$i"; dev_enable_systemd "$f"
@@ -172,6 +187,15 @@ for i in $(seq 1 "$ITER"); do
     # d) already has systemd -> idempotent, no second line
     f="$WORKROOT/d_d_$i"; printf '[boot]\nsystemd=true\n' > "$f"; dev_enable_systemd "$f"
     if [ "$(grep -c '^systemd=true' "$f")" = "1" ]; then ok; else bad "devD#$i: already-systemd dup"; fi
+    # e) explicit systemd=false -> flipped in place, never two systemd= lines
+    f="$WORKROOT/d_e_$i"; printf '[boot]\nsystemd=false\n[user]\ndefault=dev\n' > "$f"; dev_enable_systemd "$f"
+    if grep -qx 'systemd=true' "$f" && [ "$(grep -c 'systemd' "$f")" = "1" ] && grep -qx 'default=dev' "$f"; then ok; else bad "devE#$i: systemd=false not flipped"; fi
+    # f) last line has no trailing newline -> [boot] must start on its own line
+    f="$WORKROOT/d_f_$i"; printf '[user]\ndefault=dev' > "$f"; dev_enable_systemd "$f"
+    if grep -qx 'default=dev' "$f" && grep -qx '\[boot\]' "$f" && grep -qx 'systemd=true' "$f"; then ok; else bad "devF#$i: glued onto unterminated last line"; fi
+    # g) return code: 0 when it changed the file, 1 when already enabled
+    f="$WORKROOT/d_g_$i"; rm -f "$f"
+    if enable_systemd "$f" && ! enable_systemd "$f"; then ok; else bad "devG#$i: wrong return code"; fi
 done
 
 echo

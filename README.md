@@ -11,21 +11,22 @@ Fully automatic WSL setup for a Windows PC. Run one `.bat` file, pick any distro
 1. Clone or download this repo onto your Windows machine.
 2. Run `wsl-setup.bat` (double-click it, or run from `cmd.exe`). It self-elevates to Administrator via UAC.
 3. Pick a distro from the numbered menu — built live from `wsl.exe --list --online`, so it's whatever Microsoft currently offers (Ubuntu, Debian, Fedora, Arch, openSUSE, Kali, AlmaLinux, Oracle Linux, and more), never a hardcoded list that goes stale.
-4. Enter a new Linux username and password when prompted (password input is masked). The username is validated up front against Linux rules — lowercase letters, digits, hyphen and underscore, starting with a letter or underscore, max 32 chars — so an invalid name is rejected immediately instead of failing cryptically mid-install.
-5. The script installs the distro (`wsl --install -d <name> --no-launch --web-download`), waits for it to become ready, then runs `setup-user.sh` inside it to create the Linux user — `useradd`, `chpasswd`, adds to `sudo` (or `wheel` on Fedora/Arch/openSUSE), and grants **passwordless sudo** (`/etc/sudoers.d/<user>`) so system commands run without a prompt. It also sets the default user in `/etc/wsl.conf` **without clobbering** any existing section (e.g. a `[boot] systemd=true` added by `setup-dev-tools.sh`).
+4. Enter a new Linux username and password when prompted. Password input is masked and asked twice, so a typo can't lock you out. Any characters are fine, including `!`, `^`, `%`, quotes and spaces. The username is validated up front against Linux rules — lowercase letters, digits, hyphen and underscore, starting with a letter or underscore, max 32 chars — so an invalid name is rejected immediately (and you're asked again) instead of failing cryptically mid-install.
+5. The script installs the distro (`wsl --install -d <name> --no-launch --web-download`), waits for it to become ready, then runs `setup-user.sh` inside it to create the Linux user — `useradd`, `chpasswd`, adds to `sudo` (or `wheel` on Fedora/Arch/openSUSE), installs `sudo` itself first if the image ships without it, and grants **passwordless sudo** (`/etc/sudoers.d/<user>`) so system commands run without a prompt. It also sets the default user in `/etc/wsl.conf` **without clobbering** any existing section (e.g. a `[boot] systemd=true` added by `setup-dev-tools.sh`).
 6. It sets that user as the distro's default user, sets the distro as the **machine's** default (`wsl --set-default`), and verifies that typing plain `wsl` in any terminal drops straight into that user with no prompts.
 7. It writes/refreshes `start-wsl.bat` next to itself — a one-line launcher (`wsl.exe`) for quick access afterward.
 8. The window never closes itself — every path, success or error, ends with a pause so you can read the output.
 
 ## What it does differently from the built-in `wsl --install` wizard
 
-- **No plaintext credentials anywhere.** The password is read via PowerShell's masked `Read-Host`, base64-encoded, and forwarded into the Linux environment through `WSLENV` — it's never written to a log, temp file, or disk, and never spliced as raw text into a shell command line (which would break or be exploitable if the password contained a quote character). It's cleared from the script's own memory (`set "wslPass="`) immediately after use.
+- **No plaintext credentials anywhere.** The password is read via PowerShell's masked `Read-Host` and base64-encoded *inside PowerShell*. Only the base64 text comes back to the batch script, so cmd never sees the raw password and can't mangle it (cmd silently drops `!` when delayed expansion is on). It's forwarded into the distro through `WSLENV`, never written to a log, temp file or disk, and never spliced into a shell command line. As soon as the account is created the forwarding is removed and your original `WSLENV` is restored, so later steps (including the dev-tools installer) never see it.
 - **Bypasses two documented first-install pitfalls:** uses `--web-download` (Microsoft's own fix for installs hanging at 0.0%) and checks the Windows build number up front (WSL needs build 19041+), instead of failing partway with a confusing error.
+- **Re-runs reliably.** Whether a distro is already installed is read from the registry (`HKCU\...\Lxss`), not by parsing `wsl -l -q`, whose UTF-16 output on older wsl.exe builds made the check fail and the re-run try to install it again.
 - **Explains the reboot case.** A first-ever WSL install on a machine can require a Windows restart partway through; if that happens, the script says so plainly and tells you to just re-run it afterward.
 
 ### Dev tools (Node, Docker, GitHub CLI)
 
-`setup-dev-tools.sh` installs nvm/Node (LTS), Docker Engine, and the GitHub CLI inside a WSL distro. Two ways to run it:
+`setup-dev-tools.sh` installs nvm/Node (LTS), Docker Engine, and the GitHub CLI inside a **Debian/Ubuntu-based** WSL distro. On other distros it stops right away with a clear message instead of failing halfway. Two ways to run it:
 
 - **At the end of `wsl-setup.bat`** — after a distro is set up, the script offers to run it for you inside that distro (`[y/n]` prompt). Pick `y` and it runs unattended (the passwordless sudo set up above lets `apt`/Docker install without prompts).
 - **Manually, anytime** — from inside a WSL shell:
@@ -34,7 +35,7 @@ Fully automatic WSL setup for a Windows PC. Run one `.bat` file, pick any distro
   bash setup-dev-tools.sh
   ```
 
-It is safe to re-run: Node is skipped if already installed, Docker/gh are skipped if present, and systemd is only enabled once. After it adds you to the `docker` group you must open a new shell (or run `newgrp docker`) before `docker` works without `sudo`, and because it enables systemd you'll be told to run `wsl --shutdown` once for Docker to start automatically.
+It is safe to re-run: Node is skipped if already installed, Docker/gh are skipped if present, and systemd is only enabled once (an existing `systemd=false` is flipped in place, not duplicated). After it adds you to the `docker` group you must open a new shell (or run `newgrp docker`) before `docker` works without `sudo`, and because it enables systemd you'll be told to run `wsl --shutdown` once for Docker to start automatically.
 
 ## Testing
 
@@ -44,7 +45,7 @@ The in-distro shell logic is covered by a harness that needs neither Windows nor
 bash test/run-tests.sh
 ```
 
-It runs the real `setup-user.sh` (with `useradd`/`chpasswd`/`usermod` stubbed and `/etc` paths redirected) 100 times per scenario — fresh machine, preserving an existing `[boot] systemd=true`, and idempotent re-run — plus the `setup-dev-tools.sh` wsl.conf logic across its four states. `wsl-setup.bat` itself still needs a real Windows + WSL smoke test; the harness covers the bash it runs inside the distro, where the correctness-critical logic lives.
+It runs the real `setup-user.sh` (with `useradd`/`chpasswd`/`usermod` stubbed and `/etc` paths redirected) 100 times per scenario. The scenarios are: fresh machine, preserving an existing `[boot] systemd=true`, idempotent re-run, `[user]` without `default=`, and sudo missing from the image. Every run also checks that `chpasswd` got the exact password, using one full of shell- and cmd-special characters. It then sources `setup-dev-tools.sh` and runs its real `enable_systemd` across seven wsl.conf states. `wsl-setup.bat` itself still needs a real Windows + WSL smoke test; the harness covers the bash it runs inside the distro, where the correctness-critical logic lives.
 
 ## Notes
 
