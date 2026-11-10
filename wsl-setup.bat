@@ -83,49 +83,45 @@ echo   just restart and run it again; it will continue safely.
 echo.
 echo   Fetching the list of available distros ...
 
-REM  wsl.exe's intro text before the actual NAME/FRIENDLY NAME table has
-REM  changed length across wsl.exe versions (1, 2, sometimes 3 lines plus
-REM  a blank), so a fixed `skip=N` can either eat real distro rows or land
-REM  on nothing depending on which wsl.exe build is installed. Instead,
-REM  only accept lines formatted as a distro-name column (name, then 2+
-REM  spaces, then friendly name) - prose intro/error text never has that
-REM  double-space column alignment, so this works regardless of intro
-REM  line count, and still correctly reports 0 on a genuine failure
-REM  (e.g. a real "failed to fetch" error line from wsl.exe itself).
-set "onlineLog=%TEMP%\wsl_setup_online.log"
-wsl.exe --list --online > "!onlineLog!" 2>&1
-
+REM  Parsing happens in list-distros.ps1, not here: wsl.exe prints UTF-16 when
+REM  piped unless it is new enough to honour WSL_UTF8, and cmd cannot read
+REM  UTF-16, so on older builds the list always came back empty. The script
+REM  decodes the raw bytes, copes with any intro length or language, and
+REM  prints NAME^|FRIENDLY lines. If it finds nothing, it shows what wsl.exe
+REM  said on stderr, which for /f does not capture.
 set "DISTROCOUNT=0"
-for /f "usebackq tokens=1,*" %%D in (`type "!onlineLog!" ^| findstr /r /c:"^[A-Za-z0-9][A-Za-z0-9._-]*  " ^| findstr /v /b /i "NAME"`) do (
-    if not "%%D"=="" (
-        set /a DISTROCOUNT+=1
-        set "DISTRONAME_!DISTROCOUNT!=%%D"
-        set "DISTROFRIENDLY_!DISTROCOUNT!=%%E"
-    )
+if not exist "%~dp0list-distros.ps1" (
+    echo.
+    echo %CLR_YELLOW%[WARN]%CLR_RESET% list-distros.ps1 is missing next to this script.
+    goto DISTROFALLBACK
+)
+for /f "usebackq tokens=1,* delims=|" %%D in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0list-distros.ps1"`) do (
+    set /a DISTROCOUNT+=1
+    set "DISTRONAME_!DISTROCOUNT!=%%D"
+    set "DISTROFRIENDLY_!DISTROCOUNT!=%%E"
 )
 
+:DISTROFALLBACK
 REM  The live list can legitimately fail (no internet/DNS, or wsl.exe not
 REM  fully initialized yet on a brand-new machine - exactly when this tool
 REM  is most likely to be run). Rather than dying here, fall back to a
 REM  known-good fixed menu so the tool always reaches a working install
-REM  path instead of stopping with an error.
+REM  path. The pause matters: the menu below starts with cls, which would
+REM  otherwise wipe this warning and wsl.exe's own error before anyone
+REM  could read them.
 if "!DISTROCOUNT!"=="0" (
     echo.
     echo %CLR_YELLOW%[WARN]%CLR_RESET% Could not read the live distro list from 'wsl.exe --list --online'.
-    echo         Raw output from wsl.exe:
-    echo         ------------------------------------------------------
-    type "!onlineLog!"
-    echo         ------------------------------------------------------
     echo         Falling back to a fixed menu - this doesn't need the
     echo         online list and works even with no network access yet.
     echo.
     set "DISTRONAME_1=Ubuntu"
-    set "DISTROFRIENDLY_1=Ubuntu (latest LTS)"
+    set "DISTROFRIENDLY_1=Ubuntu - latest LTS"
     set "DISTRONAME_2=Debian"
     set "DISTROFRIENDLY_2=Debian"
     set "DISTROCOUNT=2"
+    pause
 )
-del "!onlineLog!" >nul 2>&1
 
 :SHOWMENU
 cls
