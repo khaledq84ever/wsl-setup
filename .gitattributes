@@ -1,0 +1,7 @@
+# Shell scripts must always be checked out with LF endings, even on Windows
+# (where core.autocrlf=true is common). A CRLF shebang makes the script fail
+# to run inside WSL with:
+#   /usr/bin/env: 'bash\r': No such file or directory
+# This matters because README tells users to run `bash setup-dev-tools.sh`
+# directly, which bypasses the CR-stripping that wsl-setup.bat does.
+*.sh text eol=lf
