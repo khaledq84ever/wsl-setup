@@ -315,34 +315,33 @@ REM  inside double quotes - a single-line `bash -c "... | chpasswd ..."`
 REM  with several of those gets silently chopped into multiple cmd-level
 REM  commands and never reaches bash intact. The username/password are
 REM  also never spliced as raw text into any parsed command line: they're
-REM  base64-encoded and forwarded through WSLENV, then decoded inside a
-REM  small generated script that's executed as `bash <path>` instead.
-set "userScript=%TEMP%\wsl_setup_apply_user.sh"
+REM  base64-encoded and forwarded through WSLENV, then decoded inside the
+REM  shipped setup-user.sh, which is executed as `bash <path>` instead.
+if not exist "%~dp0setup-user.sh" (
+    echo %CLR_RED%[ERROR]%CLR_RESET% setup-user.sh is missing next to this script.
+    echo         Download the whole repo, not just wsl-setup.bat, then re-run.
+    set "wslPass="
+    pause
+    goto MENU
+)
+
 set "WSL_SETUP_USER_RAW=!wslUser!"
 set "WSL_SETUP_PASS_RAW=!wslPass!"
 for /f "usebackq delims=" %%B in (`powershell -NoProfile -Command "[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($env:WSL_SETUP_USER_RAW))"`) do set "USER_B64=%%B"
 for /f "usebackq delims=" %%B in (`powershell -NoProfile -Command "[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($env:WSL_SETUP_PASS_RAW))"`) do set "PASS_B64=%%B"
 set "WSLENV=USER_B64:PASS_B64"
 
-(
-echo #^^!/bin/bash
-echo set -e
-echo u=$(printf '%%s' "$USER_B64" ^| base64 -d^)
-echo p=$(printf '%%s' "$PASS_B64" ^| base64 -d^)
-echo id -u "$u" ^>/dev/null 2^>^&1 ^|^| useradd -m -s /bin/bash "$u"
-echo printf '%%s:%%s\n' "$u" "$p" ^| chpasswd
-echo usermod -aG sudo "$u" 2^>/dev/null ^|^| true
-echo printf '%%s ALL=^(ALL^) NOPASSWD:ALL\n' "$u" ^> /etc/sudoers.d/"$u"
-echo chmod 0440 /etc/sudoers.d/"$u"
-echo printf '[user]\ndefault=%%s\n' "$u" ^> /etc/wsl.conf
-) > "%userScript%"
-
-for /f "usebackq delims=" %%P in (`wsl.exe -d !selectedName! -- wslpath -a "%userScript%"`) do set "SCRIPTWSL=%%P"
-REM strip CRLF - batch's `>` redirection writes \r\n, which corrupts bash parsing
-wsl.exe -d !selectedName! -u root -- sed -i "s/\r$//" "%SCRIPTWSL%"
-wsl.exe -d !selectedName! -u root -- bash "%SCRIPTWSL%"
+REM  Copy the shipped setup-user.sh into the distro, strip any CR (a CRLF
+REM  checkout on Windows would otherwise break bash parsing), and run it as
+REM  root. It reads USER_B64/PASS_B64 from the environment, forwarded above via
+REM  WSLENV. Running `bash <path>` with no shell metacharacters on the command
+REM  line avoids cmd.exe mangling a pipe, redirect, or && even inside quotes.
+for /f "usebackq delims=" %%P in (`wsl.exe -d !selectedName! -- wslpath -a "%~dp0setup-user.sh"`) do set "SCRIPTWSL=%%P"
+wsl.exe -d !selectedName! -u root -- cp "!SCRIPTWSL!" /tmp/wsl_setup_user.sh
+wsl.exe -d !selectedName! -u root -- sed -i "s/\r$//" /tmp/wsl_setup_user.sh
+wsl.exe -d !selectedName! -u root -- bash /tmp/wsl_setup_user.sh
 set "userScriptResult=!errorlevel!"
-del "%userScript%" >nul 2>&1
+wsl.exe -d !selectedName! -u root -- rm -f /tmp/wsl_setup_user.sh >nul 2>&1
 
 if not "!userScriptResult!"=="0" (
     echo %CLR_RED%[ERROR]%CLR_RESET% Creating the Linux user failed inside !selectedFriendly!. See output above.
