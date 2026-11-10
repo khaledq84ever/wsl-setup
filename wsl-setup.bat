@@ -374,6 +374,7 @@ if not exist "%~dp0setup-user.sh" (
 )
 
 set "WSL_SETUP_USER_RAW=!wslUser!"
+set "USER_B64="
 for /f "usebackq delims=" %%B in (`powershell -NoProfile -Command "[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($env:WSL_SETUP_USER_RAW))"`) do set "USER_B64=%%B"
 set "WSL_SETUP_USER_RAW="
 if defined origWSLENV (
@@ -387,7 +388,20 @@ REM  checkout on Windows would otherwise break bash parsing), and run it as
 REM  root. It reads USER_B64/PASS_B64 from the environment, forwarded above via
 REM  WSLENV. Running `bash <path>` with no shell metacharacters on the command
 REM  line avoids cmd.exe mangling a pipe, redirect, or && even inside quotes.
+REM  Every value captured with `for /f` below is cleared first: when nothing
+REM  comes back, `for /f` leaves the variable untouched, and on a second
+REM  "install another" round a stale value from the first distro would be
+REM  silently reused - e.g. reporting [OK] for a user check that failed.
+set "SCRIPTWSL="
 for /f "usebackq delims=" %%P in (`wsl.exe -d !selectedName! -- wslpath -a "%~dp0setup-user.sh"`) do set "SCRIPTWSL=%%P"
+if not defined SCRIPTWSL (
+    echo %CLR_RED%[ERROR]%CLR_RESET% Could not map setup-user.sh into !selectedFriendly! with wslpath.
+    echo         This happens when the repo is on a drive WSL cannot see, such
+    echo         as some network shares. Copy the folder to C:\ and re-run.
+    call :CLEARCREDS
+    pause
+    goto MENU
+)
 wsl.exe -d !selectedName! -u root -- cp "!SCRIPTWSL!" /tmp/wsl_setup_user.sh
 wsl.exe -d !selectedName! -u root -- sed -i "s/\r$//" /tmp/wsl_setup_user.sh
 wsl.exe -d !selectedName! -u root -- bash /tmp/wsl_setup_user.sh
@@ -437,7 +451,8 @@ if "!verifyOk!"=="1" (
     goto ASKAGAIN
 )
 
-for /f "usebackq delims=" %%w in (`wsl.exe -d !selectedName! -- whoami`) do set "defUser=%%w"
+set "defUser="
+for /f "usebackq delims=" %%w in (`wsl.exe -d !selectedName! -- whoami 2^>nul`) do set "defUser=%%w"
 if /i "!defUser!"=="!wslUser!" (
     echo %CLR_GREEN%[OK]%CLR_RESET% "!wslUser!" is set as the default user in !selectedFriendly!.
 ) else (
@@ -448,6 +463,7 @@ if /i "!defUser!"=="!wslUser!" (
 echo Making !selectedFriendly! the default so plain "wsl" opens it ...
 wsl.exe --set-default !selectedName! >nul 2>&1
 
+set "cleanCheck="
 for /f "usebackq delims=" %%c in (`wsl.exe -- whoami 2^>nul`) do set "cleanCheck=%%c"
 if /i "!cleanCheck!"=="!wslUser!" (
     echo %CLR_GREEN%[OK]%CLR_RESET% Typing "wsl" in any cmd/PowerShell window now logs straight
@@ -492,6 +508,7 @@ if exist "%~dp0setup-dev-tools.sh" (
         REM  with no shell metacharacters on the command line, which cmd.exe would
         REM  otherwise mangle even inside quotes. Note: no parens in these in-block
         REM  comments on purpose - cmd counts them against the enclosing block.
+        set "DEVSCRIPTWSL="
         for /f "usebackq delims=" %%S in (`wsl.exe -d !selectedName! -- wslpath -a "%~dp0setup-dev-tools.sh"`) do set "DEVSCRIPTWSL=%%S"
         wsl.exe -d !selectedName! -- cp "!DEVSCRIPTWSL!" /tmp/wsl_setup_devtools.sh
         wsl.exe -d !selectedName! -u root -- sed -i "s/\r$//" /tmp/wsl_setup_devtools.sh
