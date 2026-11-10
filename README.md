@@ -66,7 +66,14 @@ It checks that each menu number installs the right distro, `chpasswd` receives t
 
 What's faked: `wsl.exe` (`test/e2e/fake_windows.py`), the registry lookup, the Windows build number and the admin check. `test/e2e/proxy.c` bridges `cmd.exe` to them, because Wine drops the exit code of Linux programs. Wine's `cmd.exe` is a reimplementation with a few gaps, and it can't print the menu entries themselves (see the note in `run-e2e.sh`).
 
-`wsl-setup.bat` itself still needs a real Windows + WSL smoke test; the harness covers the bash it runs inside the distro, where the correctness-critical logic lives.
+### Continuous integration
+
+Every pull request runs `.github/workflows/test.yml`:
+
+- **Linux:** shellcheck, plus the whole suite above including the Wine end-to-end test.
+- **Windows (real `cmd.exe` + Windows PowerShell 5.1):** every `.ps1` is parsed with 5.1. Then `test/e2e/windows/run_e2e_windows.py` runs the real `wsl-setup.bat` in a real console (ConPTY via `pywinpty`) through the same four scenarios. It types into the real masked `Read-Host` prompts, and the real registry lookup, `fltmc` and build check all run. Only `wsl.exe` is faked, by `WslShim.cs` → `fake_windows.py`. This job also checks the menu text itself, which Wine can't print.
+
+What is still not covered anywhere: a real `wsl --install` and a real Linux distro. Those need a machine with WSL itself, which CI runners don't offer.
 
 ## Notes
 

@@ -53,12 +53,23 @@ foreach ($k in $snippets.Keys) {
     if ($err.Count) { Bad "$k does not parse: $($err[0].Message)" } else { Ok }
 }
 
+Write-Host '=== PS ASCII: shipped .ps1 files must be pure ASCII (PS 5.1 reads them as ANSI) ==='
+foreach ($f in Get-ChildItem (Split-Path $Bat) -Filter *.ps1) {
+    $hi = @([IO.File]::ReadAllBytes($f.FullName) | Where-Object { $_ -gt 0x7F }).Count
+    if ($hi) { Bad "$($f.Name) has $hi non-ASCII bytes" } else { Ok }
+}
+
 function Find-Snippet([string]$needle) {
     $hit = @($snippets.Values | Where-Object { $_.Contains($needle) })
     if ($hit.Count -ne 1) { throw "expected exactly one snippet containing '$needle', found $($hit.Count)" }
     $hit[0]
 }
 $pwshExe = (Get-Process -Id $PID).Path
+# Non-ASCII test values, built from char codes so this file stays pure ASCII
+# (Windows PowerShell 5.1 reads BOM-less .ps1 files as ANSI, not UTF-8).
+$dev_accent = 'd' + [char]0x00E9 + 'v'   # d, e-acute, v
+$arabic     = 'ar:' + (-join [char[]](0x0643, 0x0644, 0x0645, 0x0629))   # Arabic word
+$euro       = [string][char]0x00E9 + [char]0x20AC   # e-acute, euro sign
 
 # ---- 2. :MATCHRE ----
 Write-Host '=== PS MATCHRE: username and menu-choice validation ==='
@@ -74,7 +85,7 @@ $choiceRe = ([regex]::Match(($lines -join "`n"), 'set "CHK_RE=(\^\[1-9\][^"]*)"'
 if (-not $userRe -or -not $choiceRe) { Bad 'could not find the CHK_RE patterns in the .bat' }
 foreach ($v in 'dev', 'my_user', '_x', 'a-b', 'x1', ('a' * 32)) { Test-Match $userRe $v 0 }
 Test-Match $userRe ('a' * 33) 1   # Linux max is 32
-foreach ($v in 'Dev', 'DEV', 'Zed', 'dEv', 'devX', '1abc', 'dev&calc', 'dev|x', '', 'dév', 'a b', 'dev!', 'de^v', '%x%', '"q"', "dev`nx") {
+foreach ($v in 'Dev', 'DEV', 'Zed', 'dEv', 'devX', '1abc', 'dev&calc', 'dev|x', '', $dev_accent, 'a b', 'dev!', 'de^v', '%x%', '"q"', "dev`nx") {
     Test-Match $userRe $v 1
 }
 foreach ($v in '1', '2', '12', '9999') { Test-Match $choiceRe $v 0 }
@@ -97,7 +108,7 @@ function Test-Pw($t1, $t2, $wantMarker) {
         if ($back -ceq $t1) { Ok } else { Bad "round-trip [$t1] came back as [$back]" }
     }
 }
-foreach ($p in 'P@ss!word', 'a!b^c%d%e', 'with space', "quo'te`"dq", 'ar:كلمة', 'é€', '$(rm -rf /)', '!!', '&|<>()') {
+foreach ($p in 'P@ss!word', 'a!b^c%d%e', 'with space', "quo'te`"dq", $arabic, $euro, '$(rm -rf /)', '!!', '&|<>()') {
     Test-Pw $p $p $null
 }
 Test-Pw 'abc' 'abd' 'ERR:MISMATCH'

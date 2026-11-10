@@ -44,6 +44,12 @@ $fast = New-Fake 'wsl-fast' 'exit 3'
 $r = Run $install @('-Distro', 'X', '-WslExe', $fast, '-PollMs', '50')
 if ($r.Code -eq 3) { Ok } else { Bad "fast-exit case: exit $($r.Code), want 3" }
 
+# Silent at first: the first progress polls see an empty log. On Windows
+# PowerShell 5.1 that once crashed the script (Get-Content -Raw -> $null).
+$slow = New-Fake 'wsl-slow' 'sleep 1; echo "Downloading: 100.0%"; exit 0'
+$r = Run $install @('-Distro', 'X', '-WslExe', $slow, '-PollMs', '50')
+if ($r.Code -eq 0 -and $r.Out -notmatch 'Exception') { Ok } else { Bad "empty-log-at-first case: exit $($r.Code) [$($r.Out)]" }
+
 $r = Run $install @('-Distro', 'X', '-WslExe', (Join-Path $tmp 'missing'))
 if ($r.Code -eq 1) { Ok } else { Bad "missing wsl.exe: exit $($r.Code), want 1" }
 

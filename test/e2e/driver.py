@@ -7,7 +7,8 @@ input file would be swallowed by the first prompt. Answering one prompt at a
 time avoids that and matches how the script is really used.
 
 Usage: driver.py OUTFILE REQDIR STEPS_JSON -- COMMAND...
-STEPS_JSON is a list of [expect, answer]. expect is console text to wait for.
+STEPS_JSON is a list of [expect, answer]. expect is console text to wait for;
+answer null means "just wait for it, type nothing".
 The special value "@PASSWORD" waits until proxy.exe asks for the two password
 lines; the answer then holds both lines, joined by a newline.
 """
@@ -65,6 +66,8 @@ for expect, answer in steps:
         if time.time() > deadline:
             fail(f"timed out waiting for {expect!r}")
         time.sleep(0.05)
+    if answer is None:
+        continue
     time.sleep(0.2)  # let the prompt's own ReadFile start before typing
     proc.stdin.write((answer + "\n").encode())
     proc.stdin.flush()

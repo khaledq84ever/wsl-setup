@@ -41,6 +41,13 @@ if [ ! -d "$WINEPREFIX/drive_c" ]; then
     echo "--- creating Wine prefix (first run only, slow) ---"
     "$WINE" wineboot -i >/dev/null 2>&1 || true
 fi
+# Ubuntu's PE user32.dll imports zlib1.dll, which Wine only loads from the
+# prefix's system32 - copy it there if the distro ships it elsewhere.
+for z in /usr/x86_64-w64-mingw32/lib/zlib1.dll "$HOME/opt/wine/usr/x86_64-w64-mingw32/lib/zlib1.dll"; do
+    if [ -f "$z" ] && [ -d "$WINEPREFIX/drive_c/windows/system32" ] && [ ! -f "$WINEPREFIX/drive_c/windows/system32/zlib1.dll" ]; then
+        cp "$z" "$WINEPREFIX/drive_c/windows/system32/"
+    fi
+done
 
 # shellcheck disable=SC1003  # '\\' is a literal backslash for tr, not an escape attempt
 winpath() { printf 'Z:%s' "$1" | tr / '\\'; }
@@ -127,7 +134,7 @@ run_scenario happy '{"installed":[],"online":"utf16"}' "[
   [$MENU, \"6\"],
   [$USER, \"Dev\"], [$USER, \"dev\"],
   [\"@PASSWORD\", \"abc\nabd\"], [\"@PASSWORD\", $PWJ],
-  [\"Registration complete.\", \"\"], [$DEV, \"n\"], [$AGAIN, \"n\"], [\"Done.\", \"\"]]"
+  [\"Registration complete.\", null], [$KEY, \"\"], [$DEV, \"n\"], [$AGAIN, \"n\"], [\"Done.\", null], [$KEY, \"\"]]"
 has '"99" is not a valid option.'
 has '"1&echo INJECTED" is not a valid option.'
 hasnt 'INJECTED'
@@ -151,7 +158,7 @@ end_scenario
 echo "=== E2E 2: re-run on an already-installed distro (menu 2 -> Debian) ==="
 run_scenario rerun '{"installed":["Debian"],"online":"utf16"}' "[
   [$MENU, \"2\"], [$USER, \"dev\"], [\"@PASSWORD\", $PWJ],
-  [\"Registration complete.\", \"\"], [$DEV, \"n\"], [$AGAIN, \"n\"], [\"Done.\", \"\"]]"
+  [\"Registration complete.\", null], [$KEY, \"\"], [$DEV, \"n\"], [$AGAIN, \"n\"], [\"Done.\", null], [$KEY, \"\"]]"
 has 'Debian GNU/Linux is already installed - skipping install,'
 [ -z "$(calls installs)" ] && ok || bad "re-run tried to install [$(calls installs)]"
 [ "$(cat "$ST/root-Debian/chpasswd.log" 2>/dev/null)" = "dev:$PW" ] && ok || bad "re-run chpasswd [$(cat "$ST/root-Debian/chpasswd.log" 2>/dev/null)]"
@@ -161,9 +168,9 @@ end_scenario
 
 echo "=== E2E 3: online list unavailable -> fallback menu, 1 -> Ubuntu ==="
 run_scenario offline '{"installed":[],"online":"fail"}' "[
-  [\"Could not read the live distro list\", \"\"],
+  [\"Could not read the live distro list\", null], [$KEY, \"\"],
   [$MENU, \"1\"], [$USER, \"dev\"], [\"@PASSWORD\", $PWJ],
-  [\"Registration complete.\", \"\"], [$DEV, \"n\"], [$AGAIN, \"n\"], [\"Done.\", \"\"]]"
+  [\"Registration complete.\", null], [$KEY, \"\"], [$DEV, \"n\"], [$AGAIN, \"n\"], [\"Done.\", null], [$KEY, \"\"]]"
 has 'WININET_E_NAME_NOT_RESOLVED'
 has 'Selected: Ubuntu - latest LTS   [wsl.exe --install -d Ubuntu]'
 [ "$(calls installs)" = "Ubuntu" ] && ok || bad "installed [$(calls installs)], want Ubuntu"
@@ -174,9 +181,9 @@ end_scenario
 echo "=== E2E 4: install another - second distro, list fetched only once ==="
 run_scenario another '{"installed":[],"online":"utf8"}' "[
   [$MENU, \"4\"], [$USER, \"dev\"], [\"@PASSWORD\", $PWJ],
-  [\"Registration complete.\", \"\"], [$DEV, \"n\"], [$AGAIN, \"y\"],
+  [\"Registration complete.\", null], [$KEY, \"\"], [$DEV, \"n\"], [$AGAIN, \"y\"],
   [$MENU, \"2\"], [$USER, \"ops\"], [\"@PASSWORD\", $PWJ],
-  [\"Registration complete.\", \"\"], [$DEV, \"n\"], [$AGAIN, \"n\"], [\"Done.\", \"\"]]"
+  [\"Registration complete.\", null], [$KEY, \"\"], [$DEV, \"n\"], [$AGAIN, \"n\"], [\"Done.\", null], [$KEY, \"\"]]"
 [ "$(calls installs)" = "Ubuntu Debian" ] && ok || bad "installed [$(calls installs)], want 'Ubuntu Debian'"
 n=$(grep -c '"--list", "--online"' "$ST/calls.jsonl" || true)
 [ "$n" = "1" ] && ok || bad "online list fetched $n times, want 1"

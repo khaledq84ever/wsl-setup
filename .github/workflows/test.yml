@@ -1,0 +1,67 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux - shell, PowerShell, Wine end-to-end
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Wine and a MinGW cross-compiler
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends wine64 libwine gcc-mingw-w64-x86-64 shellcheck
+
+      - name: shellcheck
+        run: shellcheck -x setup-dev-tools.sh setup-user.sh test/run-tests.sh test/e2e/run-e2e.sh test/e2e/stubs/* test/e2e/linuxbin/wsl.exe
+
+      - name: All tests (pwsh is preinstalled on the runner)
+        env:
+          E2E: "1"
+          WINE: /usr/lib/wine/wine64
+          WINEDEBUG: "-all"
+          MINGW_CC: x86_64-w64-mingw32-gcc
+          PWSH: pwsh
+        run: bash test/run-tests.sh
+
+  windows:
+    name: Windows - real cmd.exe + Windows PowerShell 5.1 end-to-end
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Parse every PowerShell file with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $bad = 0
+          foreach ($f in Get-ChildItem -Recurse -Filter *.ps1) {
+            $err = $null
+            [void][Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$null, [ref]$err)
+            if ($err) { $bad++; Write-Host "FAIL $($f.FullName): $($err[0].Message)" } else { Write-Host "ok   $($f.Name)" }
+          }
+          Write-Host "PowerShell $($PSVersionTable.PSVersion)"
+          exit $bad
+
+      - name: Install pywinpty
+        run: python -m pip install --disable-pip-version-check pywinpty
+
+      - name: End-to-end in a real console (only wsl.exe is faked)
+        env:
+          E2E_WINDOWS_CI: "1"
+          E2E_STEP_TIMEOUT: "120"
+        run: python test/e2e/windows/run_e2e_windows.py
