@@ -157,15 +157,16 @@ def check_dev_tools(distro):
 
 
 def check_launcher():
-    """The shipped start-wsl.bat opens the default distro as the new user.
+    """The shipped start.bat opens the default distro as the new user.
     (The runner is already admin, so its UAC branch is not exercised here.)"""
-    print("=== REAL WSL launcher: start-wsl.bat ===", flush=True)
-    con = Console(["cmd.exe", "/c", os.path.join(REPO, "start-wsl.bat")], REPO, dict(os.environ))
+    print("=== REAL WSL launcher: start.bat ===", flush=True)
+    con = Console(["cmd.exe", "/c", os.path.join(REPO, "start.bat")], REPO, dict(os.environ))
     err = con.drive([["$ ", "id -un; echo MARK-$((6*7))"], ["MARK-42", "exit"]])
     out = con.text()
     check(err is None, f"launcher driver: {err}")
     lines = [l.strip() for l in out.splitlines()]
-    check(USER in lines, f"start-wsl.bat did not open a shell as {USER}: {out[-400:]!r}")
+    check(USER in lines, f"start.bat did not open a shell as {USER}: {out[-400:]!r}")
+    check("[ERROR]" not in out, f"start.bat reported an error: {out[-400:]!r}")
 
 
 def main():

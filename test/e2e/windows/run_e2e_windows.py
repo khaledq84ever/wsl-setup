@@ -158,7 +158,7 @@ class Console:
         return None
 
 
-def run_scenario(name, state, steps, work, bindir, bash):
+def run_scenario(name, state, steps, work, bindir, bash, bat="wsl-setup.bat"):
     global SCEN
     SCEN = name
     st = os.path.join(work, name)
@@ -177,7 +177,7 @@ def run_scenario(name, state, steps, work, bindir, bash):
     env.update({"E2E_STATE": st, "E2E_PYTHON": sys.executable, "E2E_FAKE": FAKE, "E2E_BASH": bash,
                 "PATH": bindir + os.pathsep + os.environ["PATH"]})
     # A list, not a string: pywinpty quotes each argument itself.
-    con = Console(["cmd.exe", "/c", os.path.join(app, "wsl-setup.bat")], app, env)
+    con = Console(["cmd.exe", "/c", os.path.join(app, bat)], app, env)
     err = con.drive(steps)
     out = con.text()
     open(os.path.join(st, "out.txt"), "w", encoding="utf-8").write(out)
@@ -265,10 +265,10 @@ def main():
         check(dt == {"user": "dev", "same": True}, f"dev tools run {dt}, want user dev + identical script")
         check("[OK] Dev-tools setup finished." in out, "dev tools OK line missing")
         for s in ("[OK] WSL is installed - version 2.6.1.0", "Default Distribution: Ubuntu-24.04",
-                  "* Ubuntu-24.04", "To open Ubuntu 24.04 LTS later as Administrator, run start-wsl.bat"):
+                  "* Ubuntu-24.04", "To open Ubuntu 24.04 LTS later as Administrator, run start.bat next to"):
             check(s in out, f"console lacks {s!r}")
-        check(open(os.path.join(REPO, "start-wsl.bat"), "rb").read()
-              == open(os.path.join(st, "app", "start-wsl.bat"), "rb").read(), "start-wsl.bat was modified")
+        check(open(os.path.join(REPO, "start.bat"), "rb").read()
+              == open(os.path.join(st, "app", "start.bat"), "rb").read(), "start.bat was modified")
         # Scripts run from /tmp must use random mktemp names and be removed.
         ran = [c["argv"][-1] for c in calls(st) if c["argv"][-2:-1] == ["bash"]]
         check(len(ran) == 2 and len(set(ran)) == 2
@@ -323,6 +323,42 @@ def main():
         check(not any("PASS_B64" in c["forwarded"] or "USER_B64" in c["forwarded"] for c in calls(st)),
               "credentials forwarded although nothing should run")
         check("Registration complete." not in out, "reported success after a failed copy")
+        if failed > before: shown.append(st)
+
+        print("=== WIN E2E 6: start.bat, no distro for this account -> says why, waits ===", flush=True)
+        st, out = run_scenario("start-nodistro", {"installed": [], "default": ""}, [[KEY, ""]],
+                               work, bindir, bash, bat="start.bat")
+        before = failed
+        check("[ERROR] No Linux distro is installed for this Windows account" in out, "no-distro case not explained")
+        check("Restart Windows, run wsl-setup.bat again" in out, "restart hint missing")
+        check(not any(c["argv"] == [] for c in calls(st)), "opened a shell although no distro is registered")
+        if failed > before: shown.append(st)
+
+        print("=== WIN E2E 7: start.bat, distro registered but WSL cannot start it ===", flush=True)
+        st, out = run_scenario("start-broken", {"installed": ["Debian"], "default": "Gone"}, [[KEY, ""]],
+                               work, bindir, bash, bat="start.bat")
+        before = failed
+        check("There is no distribution with the supplied name." in out, "wsl.exe's own error not shown")
+        check("[ERROR] WSL could not start" in out, "start failure not explained")
+        check("Default Distribution: Gone" in out, "wsl --status not shown")
+        check(not any(c["argv"] == [] for c in calls(st)), "opened a shell although WSL cannot start")
+        if failed > before: shown.append(st)
+
+        print("=== WIN E2E 8: start.bat, working distro -> opens the shell, no pause ===", flush=True)
+        st, out = run_scenario("start-ok", {"installed": ["Debian"], "default": "Debian"}, [
+            ["fake shell as root", None]], work, bindir, bash, bat="start.bat")
+        before = failed
+        check([c["argv"] for c in calls(st)] == [["--", "true"], []], f"wsl calls {[c['argv'] for c in calls(st)]}")
+        check("[ERROR]" not in out and KEY not in out, "error or pause on the working path")
+        if failed > before: shown.append(st)
+
+        print("=== WIN E2E 9: menu entry Start WSL opens the distro, then the menu is back ===", flush=True)
+        st, out = run_scenario("menu-start", {"installed": ["Debian"], "default": "Debian", "online": "utf8"}, [
+            [MENU, "9"], ["fake shell as root", None], [MENU, "0"], ["Done.", None], [KEY, ""]], work, bindir, bash)
+        before = failed
+        check("9.  Start WSL - open the distro you already installed" in out, "Start WSL menu entry missing")
+        check([] in [c["argv"] for c in calls(st)], "Start WSL did not run plain wsl")
+        check(installs(st) == [], f"Start WSL installed {installs(st)}")
         if failed > before: shown.append(st)
     finally:
         clear_fake_lxss()

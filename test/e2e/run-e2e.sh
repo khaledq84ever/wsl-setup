@@ -170,9 +170,9 @@ has '[OK] Dev-tools setup finished.'
 has '[OK] WSL is installed - version 2.6.1.0'
 has 'Default Distribution: Ubuntu-24.04'
 has '* Ubuntu-24.04'
-has 'To open Ubuntu 24.04 LTS later as Administrator, run start-wsl.bat'
-# start-wsl.bat is shipped, no longer rewritten by the .bat.
-cmp -s "$REPO/start-wsl.bat" "$ST/app/start-wsl.bat" && ok || bad "start-wsl.bat was modified"
+has 'To open Ubuntu 24.04 LTS later as Administrator, run start.bat next to'
+# start.bat is shipped, never rewritten by the .bat.
+cmp -s "$REPO/start.bat" "$ST/app/start.bat" && ok || bad "start.bat was modified"
 [ "$(calls tmpnames)" = "ok" ] && ok || bad "temp script names: $(calls tmpnames)"
 [ -z "$(ls -A "$ST/root-Ubuntu-24.04/tmp")" ] && ok || bad "left behind in /tmp: $(ls -A "$ST/root-Ubuntu-24.04/tmp")"
 

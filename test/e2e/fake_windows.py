@@ -213,6 +213,9 @@ def fake_wsl(argv, env):
     def m(p):  # distro path -> host path (forward slashes: also fine for Git Bash)
         return os.path.join(root, p.lstrip("/")).replace("\\", "/")
 
+    if not cmd:
+        # Bare `wsl`: the interactive shell start.bat opens.
+        return out(f"fake shell as {user}\n")
     if cmd == ["true"]:
         return out("")
     if cmd[:2] == ["wslpath", "-a"]:
