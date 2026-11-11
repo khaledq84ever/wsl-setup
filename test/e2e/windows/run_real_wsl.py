@@ -110,6 +110,11 @@ def run_bat(distro, round_name, dev_tools=False):
               '[OK] Typing "wsl" in any cmd/PowerShell window now logs straight'):
         check(s in out, f"console lacks {s!r}")
     check("[ERROR]" not in out and "[WARN]" not in out, "console shows an [ERROR] or [WARN]")
+    # WSL itself is reported before the menu, and its state shown after setup:
+    # the * in `wsl --list --verbose` marks the machine default.
+    check("[OK] WSL is installed - " in out, "startup WSL check did not report WSL as installed")
+    check("WSL status after setup" in out and re.search(r"(?m)^\*\s+" + re.escape(distro) + r"\s", out),
+          f"post-setup summary does not show {distro} as the default distro")
     return failed > before, out
 
 
@@ -151,6 +156,18 @@ def check_dev_tools(distro):
     check(f"default={USER}" in lines and "systemd=true" in lines, f"wsl.conf lost a key: {o!r}")
 
 
+def check_launcher():
+    """The shipped start-wsl.bat opens the default distro as the new user.
+    (The runner is already admin, so its UAC branch is not exercised here.)"""
+    print("=== REAL WSL launcher: start-wsl.bat ===", flush=True)
+    con = Console(["cmd.exe", "/c", os.path.join(REPO, "start-wsl.bat")], REPO, dict(os.environ))
+    err = con.drive([["$ ", "id -un; echo MARK-$((6*7))"], ["MARK-42", "exit"]])
+    out = con.text()
+    check(err is None, f"launcher driver: {err}")
+    lines = [l.strip() for l in out.splitlines()]
+    check(USER in lines, f"start-wsl.bat did not open a shell as {USER}: {out[-400:]!r}")
+
+
 def main():
     distro = os.environ.get("WSL_DISTRO", "Debian")
     print(f"registered before the test: {registered()}", flush=True)
@@ -165,6 +182,7 @@ def main():
             broke = broke or failed > before
         if broke:
             shown.append((rnd, out))
+    check_launcher()
     for rnd, out in shown:
         print(f"----- {rnd} console -----\n{out}\n-----")
     print(f"\n REAL WSL RESULTS: {passed} passed, {failed} failed", flush=True)

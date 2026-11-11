@@ -45,6 +45,15 @@ for ($i = 0; $i -lt $lines.Count - 1; $i++) {
 
 Write-Host "=== PS PARSE: $($snippets.Count) PowerShell snippets from wsl-setup.bat ==="
 if ($snippets.Count -lt 6) { Bad "expected at least 6 snippets, found $($snippets.Count) - extractor out of date?" }
+# ...the elevation snippet in the shipped start-wsl.bat launcher...
+$startBat = Join-Path (Split-Path $Bat) 'start-wsl.bat'
+$startLines = (Get-Content -Raw $startBat) -split "`r?`n"
+$n = 0
+for ($i = 0; $i -lt $startLines.Count; $i++) {
+    $m = [regex]::Match($startLines[$i], 'powershell -NoProfile -Command "(.*?)"\s*$')
+    if ($m.Success) { $snippets["start-wsl.bat L$($i + 1)"] = $m.Groups[1].Value; $n++ }
+}
+if ($n -ne 1) { Bad "expected 1 PowerShell snippet in start-wsl.bat, found $n" }
 # ...and the PowerShell files shipped next to the .bat.
 foreach ($f in Get-ChildItem (Split-Path $Bat) -Filter *.ps1) { $snippets["file $($f.Name)"] = Get-Content -Raw $f.FullName }
 foreach ($k in $snippets.Keys) {

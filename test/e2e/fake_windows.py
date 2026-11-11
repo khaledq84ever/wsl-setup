@@ -157,6 +157,22 @@ def fake_wsl(argv, env):
         # Old wsl.exe behaviour: UTF-16LE, no BOM, even with WSL_UTF8=1 set.
         return text.encode("utf-16-le" if mode == "utf16" else "utf-8"), b"", 0
 
+    if argv == ["--version"]:
+        # Store WSL; real wsl.exe prints UTF-16LE here when piped.
+        with Locked() as s:
+            if s.get("no_store_wsl"):
+                return err("Invalid command line option: --version\r\n", 1)
+        return ("WSL version: 2.6.1.0\r\nKernel version: 6.6.87.2-1\r\n"
+                "WSLg version: 1.0.66\r\n").encode("utf-16-le"), b"", 0
+    if argv == ["--status"]:
+        with Locked() as s:
+            d = s["default"]
+        return out(f"Default Distribution: {d}\r\nDefault Version: 2\r\n")
+    if argv == ["--list", "--verbose"]:
+        with Locked() as s:
+            d, names = s["default"], list(s["installed"])
+        rows = "".join(f"{'*' if n == d else ' '} {n:<20}Stopped         2\r\n" for n in names)
+        return out("  NAME                  STATE           VERSION\r\n" + rows)
     if argv and argv[0] == "--install":
         name = argv[argv.index("-d") + 1]
         with Locked() as s:

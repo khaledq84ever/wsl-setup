@@ -264,6 +264,11 @@ def main():
         dt = json.loads(read(os.path.join(st, "devtools.json")) or "{}")
         check(dt == {"user": "dev", "same": True}, f"dev tools run {dt}, want user dev + identical script")
         check("[OK] Dev-tools setup finished." in out, "dev tools OK line missing")
+        for s in ("[OK] WSL is installed - version 2.6.1.0", "Default Distribution: Ubuntu-24.04",
+                  "* Ubuntu-24.04", "To open Ubuntu 24.04 LTS later as Administrator, run start-wsl.bat"):
+            check(s in out, f"console lacks {s!r}")
+        check(open(os.path.join(REPO, "start-wsl.bat"), "rb").read()
+              == open(os.path.join(st, "app", "start-wsl.bat"), "rb").read(), "start-wsl.bat was modified")
         # Scripts run from /tmp must use random mktemp names and be removed.
         ran = [c["argv"][-1] for c in calls(st) if c["argv"][-2:-1] == ["bash"]]
         check(len(ran) == 2 and len(set(ran)) == 2
@@ -282,11 +287,14 @@ def main():
         if failed > before: shown.append(st)
 
         print("=== WIN E2E 3: online list unavailable -> fallback menu, 1 -> Ubuntu ===", flush=True)
-        st, out = run_scenario("offline", {"installed": [], "online": "fail"}, [
+        st, out = run_scenario("offline", {"installed": [], "online": "fail", "no_store_wsl": True}, [
             ["Could not read the live distro list", None], [KEY, ""],
             [MENU, "1"], [USER, "dev"], [PWD1, PW], [PWD2, PW]] + finish, work, bindir, bash)
         before = failed
         check("WININET_E_NAME_NOT_RESOLVED" in out, "wsl.exe error not shown")
+        # No --version answer: real Windows then asks for the WSL feature,
+        # which is on for the runner -> the built-in-WSL line.
+        check("[OK] WSL is installed - built-in Windows version" in out, "feature-based WSL check not shown")
         check("1.  Ubuntu - latest LTS" in out and "2.  Debian" in out, "fallback menu not shown")
         check(installs(st) == ["Ubuntu"], f"installed {installs(st)}")
         if failed > before: shown.append(st)
