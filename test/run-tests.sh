@@ -202,7 +202,7 @@ done
 # PWSH may be a path or a command name; resolve either.
 PWSH_BIN=$(command -v "${PWSH:-pwsh}" 2>/dev/null || true)
 if [ -n "$PWSH_BIN" ]; then
-    for t in bat-powershell.ps1 list-distros.tests.ps1 install-wait.tests.ps1; do
+    for t in bat-powershell.ps1 list-distros.tests.ps1 install-wait.tests.ps1 wsl-status.tests.ps1; do
         if "$PWSH_BIN" -NoProfile -File "$HERE/$t"; then ok; else bad "$t reported failures (see above)"; fi
     done
 else

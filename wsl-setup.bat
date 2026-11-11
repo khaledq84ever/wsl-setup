@@ -72,7 +72,7 @@ REM --- The helper files must sit next to this script. Check them all up
 REM     front, so a partial download fails here with a clear list instead of
 REM     halfway through an install.
 set "missing="
-for %%F in (setup-user.sh list-distros.ps1 install-distro.ps1 wait-distro.ps1) do (
+for %%F in (setup-user.sh list-distros.ps1 install-distro.ps1 wait-distro.ps1 wsl-status.ps1) do (
     if not exist "%~dp0%%F" set "missing=!missing! %%F"
 )
 if defined missing (
@@ -82,6 +82,9 @@ if defined missing (
     pause
     exit /b 1
 )
+
+REM --- Is WSL itself installed? (separate from any distro) ---
+call :WSLSTATUS
 
 :MENU
 REM  The distro list only needs fetching once per run - error paths and
@@ -137,6 +140,9 @@ cls
 echo %CLR_CYAN%=========================================================%CLR_RESET%
 echo                 %CLR_BOLD%%CLR_CYAN%WSL AUTO SETUP%CLR_RESET%
 echo %CLR_CYAN%=========================================================%CLR_RESET%
+echo.
+if "!WSLSTATE!"=="OK" echo   %CLR_GREEN%[OK]%CLR_RESET% !WSLSTATUS!
+if "!WSLSTATE!"=="INFO" echo   %CLR_YELLOW%[INFO]%CLR_RESET% !WSLSTATUS!
 echo.
 echo   Choose a distro to install:
 echo.
@@ -429,12 +435,21 @@ if /i "!cleanCheck!"=="!wslUser!" (
 
 set "wslUser="
 
-echo Creating start-wsl.bat next to this script for quick launching ...
-(
-    echo @echo off
-    echo title WSL
-    echo wsl.exe
-) > "%~dp0start-wsl.bat"
+REM --- Show what WSL itself now reports, so the result is visible, not
+REM     just claimed: WSL version/default distro, then every distro with its
+REM     WSL version. Printed straight to the console, not parsed.
+echo.
+echo %CLR_CYAN%=========================================================%CLR_RESET%
+echo   WSL status after setup
+echo %CLR_CYAN%=========================================================%CLR_RESET%
+wsl.exe --status
+echo.
+wsl.exe --list --verbose
+echo.
+if exist "%~dp0start-wsl.bat" (
+    echo To open !selectedFriendly! later as Administrator, run start-wsl.bat
+    echo next to this script - or just type "wsl" in any terminal.
+)
 
 echo.
 echo %CLR_GREEN%=========================================================%CLR_RESET%
@@ -496,7 +511,10 @@ pause
 echo.
 set "again="
 set /p again="Install another distribution? (y/n): "
-if /i "!again!"=="y" goto MENU
+if /i "!again!"=="y" (
+    call :WSLSTATUS
+    goto MENU
+)
 goto END
 
 :END
@@ -517,6 +535,19 @@ call :CLEARCREDS
 set "wslUser="
 pause
 goto MENU
+
+REM --- Ask wsl-status.ps1 whether WSL itself is installed ---
+REM  Sets WSLSTATE to OK / INFO and WSLSTATUS to the message, shown at the top
+REM  of the menu. Purely informational: wsl.exe --install sets WSL up either
+REM  way. Cleared first so a failed check never shows a stale result.
+:WSLSTATUS
+set "WSLSTATE="
+set "WSLSTATUS="
+for /f "usebackq tokens=1,* delims=|" %%A in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0wsl-status.ps1"`) do (
+    set "WSLSTATE=%%A"
+    set "WSLSTATUS=%%B"
+)
+exit /b
 
 REM --- Drop the base64 credentials and restore the caller's WSLENV ---
 :CLEARCREDS

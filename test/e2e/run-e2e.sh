@@ -71,7 +71,7 @@ run_scenario() {
     SKIPPED=0
     ST="$WORK/$SCEN"; APP="$ST/app"
     mkdir -p "$ST/req" "$ST/pwsh-cwd" "$APP"
-    cp "$REPO/wsl-setup.bat" "$REPO"/*.sh "$REPO"/*.ps1 "$APP/"
+    cp "$REPO"/*.bat "$REPO"/*.sh "$REPO"/*.ps1 "$APP/"
     printf '%s' "$2" > "$ST/state.json"
     : > "$ST/calls.jsonl"
     E2E_STATE="$ST" python3 "$HERE/fake_windows.py" serve "$ST/req" &
@@ -166,6 +166,13 @@ has 'Registration complete.'
 DT=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["user"], d["same"])' "$ST/devtools.json" 2>/dev/null || echo missing)
 [ "$DT" = "dev True" ] && ok || bad "dev tools run: [$DT], want 'dev True'"
 has '[OK] Dev-tools setup finished.'
+# WSL itself: checked before the menu, and its state shown after setup.
+has '[OK] WSL is installed - version 2.6.1.0'
+has 'Default Distribution: Ubuntu-24.04'
+has '* Ubuntu-24.04'
+has 'To open Ubuntu 24.04 LTS later as Administrator, run start-wsl.bat'
+# start-wsl.bat is shipped, no longer rewritten by the .bat.
+cmp -s "$REPO/start-wsl.bat" "$ST/app/start-wsl.bat" && ok || bad "start-wsl.bat was modified"
 [ "$(calls tmpnames)" = "ok" ] && ok || bad "temp script names: $(calls tmpnames)"
 [ -z "$(ls -A "$ST/root-Ubuntu-24.04/tmp")" ] && ok || bad "left behind in /tmp: $(ls -A "$ST/root-Ubuntu-24.04/tmp")"
 
@@ -183,11 +190,14 @@ has 'Registration complete.'
 end_scenario
 
 echo "=== E2E 3: online list unavailable -> fallback menu, 1 -> Ubuntu ==="
-run_scenario offline '{"installed":[],"online":"fail"}' "[
+run_scenario offline '{"installed":[],"online":"fail","no_store_wsl":true}' "[
   [\"Could not read the live distro list\", null], [$KEY, \"\"],
   [$MENU, \"1\"], [$USER, \"dev\"], [\"@PASSWORD\", $PWJ],
   [\"Registration complete.\", null], [$KEY, \"\"], [$DEV, \"n\"], [$AGAIN, \"n\"], [\"Done.\", null], [$KEY, \"\"]]"
 has 'WININET_E_NAME_NOT_RESOLVED'
+# No Store WSL answering --version, and Linux pwsh cannot ask Windows about
+# the WSL feature -> an honest "could not check", not a wrong claim.
+has '[INFO] Could not check whether WSL is installed - continuing anyway.'
 has 'Selected: Ubuntu - latest LTS   [wsl.exe --install -d Ubuntu]'
 [ "$(calls installs)" = "Ubuntu" ] && ok || bad "installed [$(calls installs)], want Ubuntu"
 has 'Registration complete.'
