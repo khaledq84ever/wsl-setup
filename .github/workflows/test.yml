@@ -101,3 +101,32 @@ jobs:
           E2E_WINDOWS_CI: "1"
           E2E_STEP_TIMEOUT: "120"
         run: python test/e2e/windows/run_e2e_windows.py
+
+  # No fakes at all: Microsoft's wsl.exe and a real Debian, installed by
+  # Vampire/setup-wsl on the hosted runner. wsl-setup.bat then takes its
+  # "already installed" path, so only `wsl --install` itself is not covered.
+  real-wsl:
+    name: Windows - real WSL + real Debian (no fakes)
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: Vampire/setup-wsl@v7
+        with:
+          distribution: Debian-13
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install pywinpty
+        run: python -m pip install --disable-pip-version-check pywinpty
+
+      - name: wsl-setup.bat against the real distro, twice
+        env:
+          E2E_WINDOWS_CI: "1"
+          E2E_STEP_TIMEOUT: "300"
+        working-directory: test/e2e/windows
+        run: python run_real_wsl.py
+
