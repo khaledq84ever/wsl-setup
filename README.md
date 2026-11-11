@@ -75,7 +75,9 @@ Every pull request runs `.github/workflows/test.yml`:
 - **Linux:** shellcheck, plus the whole suite above including the Wine end-to-end test.
 - **Windows (real `cmd.exe` + Windows PowerShell 5.1):** every `.ps1` is parsed with 5.1. Then `test/e2e/windows/run_e2e_windows.py` runs the real `wsl-setup.bat` in a real console (ConPTY via `pywinpty`) through the same five scenarios. It types into the real masked `Read-Host` prompts, and the real registry lookup, `fltmc` and build check all run. Only `wsl.exe` is faked, by `WslShim.cs` → `fake_windows.py`. This job also checks the menu text itself, which Wine can't print.
 
-What is still not covered anywhere: a real `wsl --install` and a real Linux distro. Those need a machine with WSL itself, which CI runners don't offer.
+- **Windows, no fakes at all:** `Vampire/setup-wsl` makes sure WSL works on the hosted runner. Then `test/e2e/windows/run_real_wsl.py` drives the real `wsl-setup.bat` against Microsoft's `wsl.exe`, twice. Round 1 picks Debian from the live menu, so the `.bat` really runs `wsl --install -d Debian --web-download` and waits for the distro to boot. Round 2 re-runs on the now-installed distro. After each round it checks inside the real distro that the account exists, its password hash matches exactly what was typed, `sudo -n` works, the user is the distro's and the machine's default, and nothing is left in `/tmp`.
+
+What is still not covered: a first-ever WSL install on a PC where WSL isn't enabled yet (the restart-needed path). CI runners already have WSL enabled.
 
 ## Notes
 
