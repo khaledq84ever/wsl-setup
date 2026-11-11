@@ -104,13 +104,22 @@ if what == "installs":
     print(" ".join(c["argv"][c["argv"].index("-d") + 1] for c in calls if c["argv"][:1] == ["--install"]))
 elif what == "leak":
     # Credentials may only be forwarded up to and including the setup-user.sh run.
-    idx = [i for i, c in enumerate(calls) if c["argv"][-2:] == ["bash", "/tmp/wsl_setup_user.sh"]]
+    idx = [i for i, c in enumerate(calls) if c["argv"][-2:-1] == ["bash"] and c["argv"][-1].startswith("/tmp/wsl_setup_user.")]
     if not idx: print("NO-SETUP-CALL"); sys.exit()
     # Exactly the setup-user.sh run(s) may see the credentials - no other call.
     others = [c for i, c in enumerate(calls) if i not in idx
               and ("PASS_B64" in c["forwarded"] or "USER_B64" in c["forwarded"])]
     seen = all("PASS_B64" in calls[i]["forwarded"] for i in idx)
     print("ok" if seen and not others else f"LEAK {others[:1]}" if others else "NOT-FORWARDED")
+elif what == "fwdcount":
+    print(sum(1 for c in calls if "PASS_B64" in c["forwarded"] or "USER_B64" in c["forwarded"]))
+elif what == "tmpnames":
+    # Every script the .bat ran from /tmp: must be a random mktemp name, never
+    # a fixed one another user could have created first.
+    import re
+    ran = [c["argv"][-1] for c in calls if c["argv"][-2:-1] == ["bash"]]
+    bad = [r for r in ran if not re.fullmatch(r"/tmp/wsl_setup_(user|devtools)\.[A-Za-z0-9]{8}", r)]
+    print("ok" if ran and not bad and len(set(ran)) == len(ran) else f"BAD {ran}")
 elif what == "setdefault":
     print(" ".join(c["argv"][1] for c in calls if c["argv"][:1] == ["--set-default"]))
 PY
@@ -157,6 +166,8 @@ has 'Registration complete.'
 DT=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["user"], d["same"])' "$ST/devtools.json" 2>/dev/null || echo missing)
 [ "$DT" = "dev True" ] && ok || bad "dev tools run: [$DT], want 'dev True'"
 has '[OK] Dev-tools setup finished.'
+[ "$(calls tmpnames)" = "ok" ] && ok || bad "temp script names: $(calls tmpnames)"
+[ -z "$(ls -A "$ST/root-Ubuntu-24.04/tmp")" ] && ok || bad "left behind in /tmp: $(ls -A "$ST/root-Ubuntu-24.04/tmp")"
 
 end_scenario
 
@@ -194,6 +205,17 @@ n=$(grep -c '"--list", "--online"' "$ST/calls.jsonl" || true)
 [ "$n" = "1" ] && ok || bad "online list fetched $n times, want 1"
 grep -qx 'default=ops' "$ST/root-Debian/etc/wsl.conf" 2>/dev/null && ok || bad "second distro default user not ops"
 [ "$(grep -c 'Registration complete.' "$OUT")" = "2" ] && ok || bad "expected two completed registrations"
+
+end_scenario
+
+echo "=== E2E 5: script cannot be copied into the distro -> clean stop, nothing run ==="
+run_scenario copyfail '{"installed":["Debian"],"online":"utf16","mktemp_fail":true}' "[
+  [$MENU, \"2\"], [$USER, \"dev\"], [\"@PASSWORD\", $PWJ],
+  [\"Could not copy setup-user.sh\", null], [$KEY, \"\"], [$MENU, \"0\"], [\"Done.\", null], [$KEY, \"\"]]"
+has 'Could not copy setup-user.sh into Debian GNU/Linux - no account'
+[ ! -e "$ST/root-Debian/chpasswd.log" ] && ok || bad "an account was touched although the copy failed"
+[ "$(calls fwdcount)" = "0" ] && ok || bad "credentials forwarded to $(calls fwdcount) call(s) although nothing should run"
+[ "$(grep -c 'Registration complete.' "$OUT")" = "0" ] && ok || bad "reported success after a failed copy"
 
 end_scenario
 

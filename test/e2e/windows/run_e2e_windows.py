@@ -196,7 +196,8 @@ def installs(st):
 
 def leak(st):
     cs = calls(st)
-    idx = [i for i, c in enumerate(cs) if c["argv"][-2:] == ["bash", "/tmp/wsl_setup_user.sh"]]
+    idx = [i for i, c in enumerate(cs)
+           if c["argv"][-2:-1] == ["bash"] and c["argv"][-1].startswith("/tmp/wsl_setup_user.")]
     if not idx:
         return "NO-SETUP-CALL"
     others = [c for i, c in enumerate(cs) if i not in idx
@@ -263,6 +264,12 @@ def main():
         dt = json.loads(read(os.path.join(st, "devtools.json")) or "{}")
         check(dt == {"user": "dev", "same": True}, f"dev tools run {dt}, want user dev + identical script")
         check("[OK] Dev-tools setup finished." in out, "dev tools OK line missing")
+        # Scripts run from /tmp must use random mktemp names and be removed.
+        ran = [c["argv"][-1] for c in calls(st) if c["argv"][-2:-1] == ["bash"]]
+        check(len(ran) == 2 and len(set(ran)) == 2
+              and all(re.fullmatch(r"/tmp/wsl_setup_(user|devtools)\.[A-Za-z0-9]{8}", r) for r in ran),
+              f"temp script names {ran}")
+        check(os.listdir(os.path.join(root, "tmp")) == [], f"left in /tmp: {os.listdir(os.path.join(root, 'tmp'))}")
         if failed > before: shown.append(st)
 
         print("=== WIN E2E 2: re-run, Debian already registered (real registry lookup) ===", flush=True)
@@ -295,6 +302,19 @@ def main():
         check(n == 1, f"online list fetched {n} times")
         check("default=ops" in read(os.path.join(st, "root-Debian", "etc", "wsl.conf")).splitlines(), "second default user")
         check(out.count("Registration complete.") == 2, "two registrations expected")
+        if failed > before: shown.append(st)
+
+        print("=== WIN E2E 5: script cannot be copied into the distro -> clean stop ===", flush=True)
+        st, out = run_scenario("copyfail", {"installed": ["Debian"], "online": "utf16", "mktemp_fail": True}, [
+            [MENU, "2"], [USER, "dev"], [PWD1, PW], [PWD2, PW],
+            ["Could not copy setup-user.sh", None], [KEY, ""], [MENU, "0"], ["Done.", None], [KEY, ""]],
+            work, bindir, bash)
+        before = failed
+        check("Could not copy setup-user.sh into Debian GNU/Linux - no account" in out, "copy failure not reported")
+        check(not os.path.exists(os.path.join(st, "root-Debian", "chpasswd.log")), "account touched after failed copy")
+        check(not any("PASS_B64" in c["forwarded"] or "USER_B64" in c["forwarded"] for c in calls(st)),
+              "credentials forwarded although nothing should run")
+        check("Registration complete." not in out, "reported success after a failed copy")
         if failed > before: shown.append(st)
     finally:
         clear_fake_lxss()

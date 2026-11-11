@@ -246,8 +246,10 @@ REM  ignore WSL_UTF8 and print UTF-16, which `for /f` reads as garbage, so the
 REM  check silently said "not installed" and a re-run then died trying to
 REM  install a distro that already exists. Every registered distro has a
 REM  DistributionName value under this key; the lookup is case-insensitive.
+REM  The name reaches PowerShell as an env var, never spliced into the command.
 set "alreadyInstalled=0"
-powershell -NoProfile -Command "$n = '!selectedName!'; $hit = Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss' -ErrorAction SilentlyContinue | Where-Object { $_.GetValue('DistributionName') -eq $n }; if ($hit) { exit 0 } else { exit 1 }"
+set "WSL_SETUP_DISTRO=!selectedName!"
+powershell -NoProfile -Command "$n = $env:WSL_SETUP_DISTRO; $hit = Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss' -ErrorAction SilentlyContinue | Where-Object { $_.GetValue('DistributionName') -eq $n }; if ($hit) { exit 0 } else { exit 1 }"
 if "!errorlevel!"=="0" set "alreadyInstalled=1"
 
 if "!alreadyInstalled!"=="1" (
@@ -340,8 +342,17 @@ if not defined SCRIPTWSL (
     pause
     goto MENU
 )
-wsl.exe -d !selectedName! -u root -- cp "!SCRIPTWSL!" /tmp/wsl_setup_user.sh
-wsl.exe -d !selectedName! -u root -- sed -i "s/\r$//" /tmp/wsl_setup_user.sh
+REM  The copy goes into a file that root's own mktemp just created: a random
+REM  name, owned by root, mode 0600. A fixed /tmp name could be created first
+REM  by another user of an already-installed distro, who would then own the
+REM  file and could rewrite it before it runs here as root.
+set "TMPSCRIPT="
+for /f "usebackq delims=" %%T in (`wsl.exe -d !selectedName! -u root -- mktemp /tmp/wsl_setup_user.XXXXXXXX`) do set "TMPSCRIPT=%%T"
+if not defined TMPSCRIPT goto COPYFAIL
+wsl.exe -d !selectedName! -u root -- cp "!SCRIPTWSL!" "!TMPSCRIPT!"
+if errorlevel 1 goto COPYFAIL
+wsl.exe -d !selectedName! -u root -- sed -i "s/\r$//" "!TMPSCRIPT!"
+if errorlevel 1 goto COPYFAIL
 REM  Forward the credentials into exactly this one call, then stop at once.
 REM  Otherwise every later wsl.exe call in this window - including
 REM  setup-dev-tools.sh, which pipes installers from the internet into a
@@ -351,10 +362,10 @@ if defined origWSLENV (
 ) else (
     set "WSLENV=USER_B64:PASS_B64"
 )
-wsl.exe -d !selectedName! -u root -- bash /tmp/wsl_setup_user.sh
+wsl.exe -d !selectedName! -u root -- bash "!TMPSCRIPT!"
 set "userScriptResult=!errorlevel!"
 call :CLEARCREDS
-wsl.exe -d !selectedName! -u root -- rm -f /tmp/wsl_setup_user.sh >nul 2>&1
+wsl.exe -d !selectedName! -u root -- rm -f "!TMPSCRIPT!" >nul 2>&1
 
 if not "!userScriptResult!"=="0" (
     echo %CLR_RED%[ERROR]%CLR_RESET% Creating the Linux user failed inside !selectedFriendly!. See output above.
@@ -439,35 +450,47 @@ REM  Offered here (not chained automatically) so the core WSL setup stays fast
 REM  and self-contained; dev tools are a separate, slower, network-heavy step.
 REM  Runs as the distro's default user (the account just created) - no -u needed,
 REM  and the NOPASSWD sudo granted above lets its apt/docker steps run unattended.
-if exist "%~dp0setup-dev-tools.sh" (
-    echo.
-    set "devChoice="
-    set /p devChoice="Install dev tools now inside !selectedFriendly! - Node, Docker, GitHub CLI? [y/n]: "
-    if /i "!devChoice!"=="y" (
-        echo.
-        echo Running setup-dev-tools.sh inside !selectedFriendly! ...
-        REM  Resolve the Windows path to a WSL path, copy it in, strip CR - the file
-        REM  may be checked out with CRLF on Windows - then run it as 'bash path'
-        REM  with no shell metacharacters on the command line, which cmd.exe would
-        REM  otherwise mangle even inside quotes. Note: no parens in these in-block
-        REM  comments on purpose - cmd counts them against the enclosing block.
-        set "DEVSCRIPTWSL="
-        for /f "usebackq delims=" %%S in (`wsl.exe -d !selectedName! -- wslpath -a "%~dp0setup-dev-tools.sh"`) do set "DEVSCRIPTWSL=%%S"
-        wsl.exe -d !selectedName! -- cp "!DEVSCRIPTWSL!" /tmp/wsl_setup_devtools.sh
-        wsl.exe -d !selectedName! -u root -- sed -i "s/\r$//" /tmp/wsl_setup_devtools.sh
-        wsl.exe -d !selectedName! -- bash /tmp/wsl_setup_devtools.sh
-        set "devResult=!errorlevel!"
-        wsl.exe -d !selectedName! -- rm -f /tmp/wsl_setup_devtools.sh >nul 2>&1
-        if not "!devResult!"=="0" (
-            echo %CLR_YELLOW%[WARN]%CLR_RESET% Dev-tools setup reported an error above. You can re-run it
-            echo        anytime inside WSL with: bash setup-dev-tools.sh
-        ) else (
-            echo %CLR_GREEN%[OK]%CLR_RESET% Dev-tools setup finished.
-        )
-        echo.
-        pause
-    )
+if not exist "%~dp0setup-dev-tools.sh" goto ASKAGAIN
+echo.
+set "devChoice="
+set /p devChoice="Install dev tools now inside !selectedFriendly! - Node, Docker, GitHub CLI? [y/n]: "
+if /i not "!devChoice!"=="y" goto ASKAGAIN
+echo.
+echo Running setup-dev-tools.sh inside !selectedFriendly! ...
+REM  Resolve the Windows path to a WSL path, copy it into a private temp file
+REM  (the new user's own mktemp - see the note at setup-user.sh above), strip
+REM  CR - the file may be checked out with CRLF on Windows - then run it as
+REM  `bash <path>` with no shell metacharacters on the command line.
+set "DEVSCRIPTWSL="
+set "DEVTMP="
+for /f "usebackq delims=" %%S in (`wsl.exe -d !selectedName! -- wslpath -a "%~dp0setup-dev-tools.sh"`) do set "DEVSCRIPTWSL=%%S"
+if not defined DEVSCRIPTWSL goto DEVCOPYFAIL
+for /f "usebackq delims=" %%T in (`wsl.exe -d !selectedName! -- mktemp /tmp/wsl_setup_devtools.XXXXXXXX`) do set "DEVTMP=%%T"
+if not defined DEVTMP goto DEVCOPYFAIL
+wsl.exe -d !selectedName! -- cp "!DEVSCRIPTWSL!" "!DEVTMP!"
+if errorlevel 1 goto DEVCOPYFAIL
+wsl.exe -d !selectedName! -- sed -i "s/\r$//" "!DEVTMP!"
+if errorlevel 1 goto DEVCOPYFAIL
+wsl.exe -d !selectedName! -- bash "!DEVTMP!"
+set "devResult=!errorlevel!"
+wsl.exe -d !selectedName! -- rm -f "!DEVTMP!" >nul 2>&1
+if not "!devResult!"=="0" (
+    echo %CLR_YELLOW%[WARN]%CLR_RESET% Dev-tools setup reported an error above. You can re-run it
+    echo        anytime inside WSL with: bash setup-dev-tools.sh
+) else (
+    echo %CLR_GREEN%[OK]%CLR_RESET% Dev-tools setup finished.
 )
+echo.
+pause
+goto ASKAGAIN
+
+:DEVCOPYFAIL
+echo %CLR_YELLOW%[WARN]%CLR_RESET% Could not copy setup-dev-tools.sh into !selectedFriendly! - dev tools
+echo        were NOT installed. Your WSL account itself is set up fine. To install
+echo        them later, run inside WSL: bash setup-dev-tools.sh
+if defined DEVTMP wsl.exe -d !selectedName! -- rm -f "!DEVTMP!" >nul 2>&1
+echo.
+pause
 
 :ASKAGAIN
 echo.
@@ -484,6 +507,16 @@ echo %CLR_CYAN%=========================================================%CLR_RES
 echo.
 pause
 exit /b
+
+REM --- setup-user.sh could not be copied into the distro ---
+:COPYFAIL
+echo %CLR_RED%[ERROR]%CLR_RESET% Could not copy setup-user.sh into !selectedFriendly! - no account
+echo         was created. See any output above, then try again.
+if defined TMPSCRIPT wsl.exe -d !selectedName! -u root -- rm -f "!TMPSCRIPT!" >nul 2>&1
+call :CLEARCREDS
+set "wslUser="
+pause
+goto MENU
 
 REM --- Drop the base64 credentials and restore the caller's WSLENV ---
 :CLEARCREDS
