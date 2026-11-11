@@ -9,6 +9,13 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same PR/branch supersedes the older run: cancel it
+# instead of letting both hold runners. Runs on main are never cancelled,
+# so every merged commit keeps its own result.
+concurrency:
+  group: test-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   linux:
     name: Linux - shell, PowerShell, Wine end-to-end
