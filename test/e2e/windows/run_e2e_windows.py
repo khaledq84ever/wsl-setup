@@ -234,7 +234,7 @@ def main():
     try:
         print("=== WIN E2E 1: live list (UTF-16), bad input, menu 6 -> Ubuntu-24.04 ===", flush=True)
         st, out = run_scenario("happy", {"installed": [], "online": "utf16"}, [
-            [MENU, "99"], [KEY, ""], [MENU, "1&echo INJECTED"], [KEY, ""], [MENU, "6"],
+            [MENU, "7"], [KEY, ""], [MENU, "1"], [MENU, "99"], [KEY, ""], [MENU, "1&echo INJECTED"], [KEY, ""], [MENU, "6"],
             [USER, "Dev"], [USER, "dev"],
             [PWD1, "abc"], [PWD2, "abd"], [PWD1, PW], [PWD2, PW],
             ["Registration complete.", None], [KEY, ""], [DEV, "y"],
@@ -258,6 +258,7 @@ def main():
         check(read(os.path.join(root, "etc", "sudoers.d", "dev")).strip() == "dev ALL=(ALL) NOPASSWD:ALL", "sudoers rule")
         check([c["argv"][1] for c in calls(st) if c["argv"][:1] == ["--set-default"]] == ["Ubuntu-24.04"], "set-default")
         check(leak(st) == "ok", "credential forwarding: " + leak(st))
+        check('"7" is not a valid option.' in out, "bad main-menu choice not rejected")
         for s in ('[OK] User "dev" is registered in Ubuntu 24.04 LTS.', '[OK] "dev" is set as the default user',
                   '[OK] Typing "wsl" in any cmd/PowerShell window now logs straight'):
             check(s in out, f"console lacks {s!r}")
@@ -279,7 +280,7 @@ def main():
 
         print("=== WIN E2E 2: re-run, Debian already registered (real registry lookup) ===", flush=True)
         st, out = run_scenario("rerun", {"installed": ["Debian"], "online": "utf16"}, [
-            [MENU, "2"], [USER, "dev"], [PWD1, PW], [PWD2, PW]] + finish, work, bindir, bash)
+            [MENU, "1"], [MENU, "2"], [USER, "dev"], [PWD1, PW], [PWD2, PW]] + finish, work, bindir, bash)
         before = failed
         check("Debian GNU/Linux is already installed - skipping install," in out, "not detected as installed")
         check(installs(st) == [], f"re-run installed {installs(st)}")
@@ -288,7 +289,7 @@ def main():
 
         print("=== WIN E2E 3: online list unavailable -> fallback menu, 1 -> Ubuntu ===", flush=True)
         st, out = run_scenario("offline", {"installed": [], "online": "fail", "no_store_wsl": True}, [
-            ["Could not read the live distro list", None], [KEY, ""],
+            [MENU, "1"], ["Could not read the live distro list", None], [KEY, ""],
             [MENU, "1"], [USER, "dev"], [PWD1, PW], [PWD2, PW]] + finish, work, bindir, bash)
         before = failed
         check("WININET_E_NAME_NOT_RESOLVED" in out, "wsl.exe error not shown")
@@ -301,7 +302,7 @@ def main():
 
         print("=== WIN E2E 4: install another; list fetched once ===", flush=True)
         st, out = run_scenario("another", {"installed": [], "online": "utf8"}, [
-            [MENU, "4"], [USER, "dev"], [PWD1, PW], [PWD2, PW],
+            [MENU, "1"], [MENU, "4"], [USER, "dev"], [PWD1, PW], [PWD2, PW],
             ["Registration complete.", None], [KEY, ""], [DEV, "n"], [AGAIN, "y"],
             [MENU, "2"], [USER, "ops"], [PWD1, PW], [PWD2, PW]] + finish, work, bindir, bash)
         before = failed
@@ -314,7 +315,7 @@ def main():
 
         print("=== WIN E2E 5: script cannot be copied into the distro -> clean stop ===", flush=True)
         st, out = run_scenario("copyfail", {"installed": ["Debian"], "online": "utf16", "mktemp_fail": True}, [
-            [MENU, "2"], [USER, "dev"], [PWD1, PW], [PWD2, PW],
+            [MENU, "1"], [MENU, "2"], [USER, "dev"], [PWD1, PW], [PWD2, PW],
             ["Could not copy setup-user.sh", None], [KEY, ""], [MENU, "0"], ["Done.", None], [KEY, ""]],
             work, bindir, bash)
         before = failed
@@ -352,11 +353,13 @@ def main():
         check("[ERROR]" not in out and KEY not in out, "error or pause on the working path")
         if failed > before: shown.append(st)
 
-        print("=== WIN E2E 9: menu entry Start WSL opens the distro, then the menu is back ===", flush=True)
+        print("=== WIN E2E 9: main menu 2 = Start WSL, then 1 -> distro list -> 0 Back -> 0 Exit ===", flush=True)
         st, out = run_scenario("menu-start", {"installed": ["Debian"], "default": "Debian", "online": "utf8"}, [
-            [MENU, "9"], ["fake shell as root", None], [MENU, "0"], ["Done.", None], [KEY, ""]], work, bindir, bash)
+            [MENU, "2"], ["fake shell as root", None], [MENU, "1"], [MENU, "0"], [MENU, "0"], ["Done.", None], [KEY, ""]], work, bindir, bash)
         before = failed
-        check("9.  Start WSL - open the distro you already installed" in out, "Start WSL menu entry missing")
+        check("1.  Install a Linux distro" in out and "2.  Start WSL - open the distro you already installed" in out,
+              "main menu entries missing")
+        check("0.  Back" in out, "distro list has no Back entry")
         check([] in [c["argv"] for c in calls(st)], "Start WSL did not run plain wsl")
         check(installs(st) == [], f"Start WSL installed {installs(st)}")
         if failed > before: shown.append(st)

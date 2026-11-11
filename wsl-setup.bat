@@ -86,18 +86,53 @@ if defined missing (
 REM --- Is WSL itself installed? (separate from any distro) ---
 call :WSLSTATUS
 
+REM --- Main menu: install a distro, or open the one already installed ---
 :MENU
-REM  The distro list only needs fetching once per run - error paths and
-REM  "install another" come back here, and wsl.exe --list --online is slow.
-if defined DISTROCOUNT goto SHOWMENU
 cls
 echo %CLR_CYAN%=========================================================%CLR_RESET%
 echo                 %CLR_BOLD%%CLR_CYAN%WSL AUTO SETUP%CLR_RESET%
 echo %CLR_CYAN%=========================================================%CLR_RESET%
 echo.
+if "!WSLSTATE!"=="OK" echo   %CLR_GREEN%[OK]%CLR_RESET% !WSLSTATUS!
+if "!WSLSTATE!"=="INFO" echo   %CLR_YELLOW%[INFO]%CLR_RESET% !WSLSTATUS!
+echo.
+echo   1.  Install a Linux distro
+echo   2.  Start WSL - open the distro you already installed
+echo   0.  Exit
+echo.
 echo   First time installing WSL on this PC? A restart may be
 echo   needed partway through - if this tool stops and says so,
 echo   just restart and run it again; it will continue safely.
+echo.
+
+REM  Compared with delayed expansion only, never percent-expanded into a
+REM  parsed line: a typed "1&something" must not run as a command in this
+REM  elevated window.
+set "choice="
+set /p choice="Choose an option: "
+if "!choice!"=="0" goto END
+if "!choice!"=="1" goto DISTROMENU
+if "!choice!"=="2" goto STARTWSL
+echo.
+echo %CLR_RED%[ERROR]%CLR_RESET% "!choice!" is not a valid option.
+echo.
+pause
+goto MENU
+
+REM --- Menu entry "Start WSL": the shipped start.bat opens the default
+REM     distro in this (already elevated) window. If WSL cannot start it
+REM     says why and waits for a key itself; either way the menu comes back.
+:STARTWSL
+echo.
+call "%~dp0start.bat"
+title WSL Setup
+goto MENU
+
+REM --- Distro list (main menu entry 1, and "install another") ---
+:DISTROMENU
+REM  The distro list only needs fetching once per run - a bad choice and
+REM  "install another" come back here, and wsl.exe --list --online is slow.
+if defined DISTROCOUNT goto SHOWMENU
 echo.
 echo   Fetching the list of available distros ...
 
@@ -149,17 +184,13 @@ echo.
 for /l %%i in (1,1,!DISTROCOUNT!) do (
     echo   %%i.  !DISTROFRIENDLY_%%i!
 )
-REM  One number past the list: open WSL instead of installing anything.
-set /a STARTNUM=DISTROCOUNT+1
-echo.
-echo   !STARTNUM!.  Start WSL - open the distro you already installed
-echo   0.  Exit
+echo   0.  Back
 echo.
 
 set "choice="
 set /p choice="Choose an option: "
 
-if "!choice!"=="0" goto END
+if "!choice!"=="0" goto MENU
 
 REM  Validated without percent-expanding the choice into a parsed line: a typed
 REM  "1&something" would otherwise run as a command in this elevated window.
@@ -170,27 +201,17 @@ if errorlevel 1 goto BADCHOICE
 REM  Digits only from here on. A number past the end of the list simply has no
 REM  DISTRONAME_n, which also covers the old GTR check, including numbers
 REM  too big for cmd's 32-bit compare.
-if "!choice!"=="!STARTNUM!" goto STARTWSL
 if not defined DISTRONAME_!choice! goto BADCHOICE
 set "selectedName=!DISTRONAME_%choice%!"
 set "selectedFriendly=!DISTROFRIENDLY_%choice%!"
 goto GOTCHOICE
-
-REM --- Menu entry "Start WSL": the shipped start.bat opens the default
-REM     distro in this (already elevated) window. If WSL cannot start it says why and waits
-REM     for a key itself; either way the menu comes back afterwards.
-:STARTWSL
-echo.
-call "%~dp0start.bat"
-title WSL Setup
-goto MENU
 
 :BADCHOICE
 echo.
 echo %CLR_RED%[ERROR]%CLR_RESET% "!choice!" is not a valid option.
 echo.
 pause
-goto MENU
+goto DISTROMENU
 
 :GOTCHOICE
 echo.
@@ -461,7 +482,7 @@ echo.
 wsl.exe --list --verbose
 echo.
 echo To open !selectedFriendly! later as Administrator, run start.bat next to
-echo this script, or pick "Start WSL" in this menu. If WSL cannot start,
+echo this script, or pick "Start WSL" in the main menu. If WSL cannot start,
 echo it tells you why. Or just type "wsl" in any terminal.
 
 echo.
@@ -526,7 +547,7 @@ set "again="
 set /p again="Install another distribution? (y/n): "
 if /i "!again!"=="y" (
     call :WSLSTATUS
-    goto MENU
+    goto DISTROMENU
 )
 goto END
 

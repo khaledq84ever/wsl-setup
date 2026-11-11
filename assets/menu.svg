@@ -27,7 +27,7 @@
     <text x="96" y="326" fill="#e6edf3">  4.  Fedora Remix for WSL</text>
     <text x="96" y="354" fill="#e6edf3">  5.  openSUSE-Tumbleweed</text>
     <text x="96" y="382" fill="#e6edf3">  6.  AlmaLinux OS 9</text>
-    <text x="96" y="410" fill="#6e7681">  0.  Exit</text>
+    <text x="96" y="410" fill="#6e7681">  0.  Back</text>
 
     <text x="96" y="450" fill="#c9d1d9">Choose an option: </text>
     <text x="296" y="450" fill="#3fb950" font-weight="bold">1</text>
