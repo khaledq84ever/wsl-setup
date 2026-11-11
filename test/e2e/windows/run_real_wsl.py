@@ -11,8 +11,9 @@ Checked inside the distro afterwards: the account exists, its password hash
 matches exactly what was typed (cmd/PowerShell special characters included),
 passwordless sudo works, wsl.conf makes it the default user, the distro is
 the machine default, and no temp script is left in /tmp. Then the .bat runs a
-second time on the same distro (idempotent re-run) and everything is checked
-again.
+second time on the same distro (idempotent re-run), this time answering "y"
+to the dev-tools prompt, so setup-dev-tools.sh really installs nvm/Node,
+Docker and gh; those, the docker group and wsl.conf are checked as well.
 
 Reuses the real-console driver from run_e2e_windows.py. Like that script it
 refuses to run unless E2E_WINDOWS_CI=1: it creates a sudo-enabled account in
@@ -85,15 +86,16 @@ def menu_number(distro):
     sys.exit(f"{distro} is not in the menu {rows} - pick a distribution that wsl --list --online offers")
 
 
-def run_bat(distro, round_name):
+def run_bat(distro, round_name, dev_tools=False):
     was_installed = distro.lower() in [n.lower() for n in registered()]
     print(f"=== REAL WSL {round_name}: wsl-setup.bat, {distro} "
           f"{'already registered' if was_installed else 'not installed yet'} ===", flush=True)
     num = menu_number(distro)
     con = Console(["cmd.exe", "/c", os.path.join(REPO, "wsl-setup.bat")], REPO, dict(os.environ))
+    dev = ([[DEV, "y"], ["Dev-tools setup finished.", None], [KEY, ""]] if dev_tools else [[DEV, "n"]])
     err = con.drive([
         [MENU, num], [UPROMPT, USER], [PWD1, PW], [PWD2, PW],
-        ["Registration complete.", None], [KEY, ""], [DEV, "n"], [AGAIN, "n"], ["Done.", None], [KEY, ""]])
+        ["Registration complete.", None], [KEY, ""]] + dev + [[AGAIN, "n"], ["Done.", None], [KEY, ""]])
     out = con.text()
     log = os.path.join(tempfile.gettempdir(), f"real-wsl-{round_name}.txt")
     open(log, "w", encoding="utf-8").write(out)
@@ -134,13 +136,33 @@ def check_distro(distro):
     check(r.stdout.decode("utf-8", "replace").replace("\0", "").strip() == USER, "plain `wsl` does not open as the new user")
 
 
+def check_dev_tools(distro):
+    """setup-dev-tools.sh really ran in the distro, as the new user."""
+    rc, o = wsl(distro, USER, "bash", "-c", ". ~/.nvm/nvm.sh && node -v")
+    check(rc == 0 and o.startswith("v"), f"node via nvm: rc={rc} {o!r}")
+    for tool in ("gh", "docker"):
+        rc, o = wsl(distro, USER, tool, "--version")
+        check(rc == 0, f"{tool} --version: rc={rc} {o!r}")
+    rc, o = wsl(distro, "root", "id", "-nG", USER)
+    check("docker" in o.split(), f"{USER} not in the docker group: {o!r}")
+    # Both scripts write wsl.conf; neither may clobber the other's key.
+    rc, o = wsl(distro, "root", "cat", "/etc/wsl.conf")
+    lines = [l.strip() for l in o.splitlines()]
+    check(f"default={USER}" in lines and "systemd=true" in lines, f"wsl.conf lost a key: {o!r}")
+
+
 def main():
     distro = os.environ.get("WSL_DISTRO", "Debian")
     print(f"registered before the test: {registered()}", flush=True)
     shown = []
     for rnd in ("first-run", "re-run"):
-        broke, out = run_bat(distro, rnd)
+        dev_tools = rnd == "re-run"   # round 2 also installs the dev tools for real
+        broke, out = run_bat(distro, rnd, dev_tools)
         check_distro(distro)
+        if dev_tools:
+            before = failed
+            check_dev_tools(distro)
+            broke = broke or failed > before
         if broke:
             shown.append((rnd, out))
     for rnd, out in shown:

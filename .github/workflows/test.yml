@@ -129,10 +129,11 @@ jobs:
       - name: Install pywinpty
         run: python -m pip install --disable-pip-version-check pywinpty
 
-      - name: wsl-setup.bat installs Debian for real, then re-runs on it
+      - name: wsl-setup.bat installs Debian for real, then re-runs it with dev tools
         env:
           E2E_WINDOWS_CI: "1"
-          E2E_STEP_TIMEOUT: "300"
+          # One step covers the whole dev-tools install (apt, nvm, Node, Docker, gh).
+          E2E_STEP_TIMEOUT: "900"
         working-directory: test/e2e/windows
         run: python run_real_wsl.py
 
