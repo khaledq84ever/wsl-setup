@@ -17,10 +17,39 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install Wine and a MinGW cross-compiler
+      # The runner's apt mirror list (/etc/apt/apt-mirrors.txt) is Azure first,
+      # then archive/security.ubuntu.com. When those stall, apt waits out a
+      # full timeout per file and the job looks hung (2026-11-11: Azure did not
+      # resolve, the other two timed out). Probe each candidate with a package
+      # this job really installs (release pocket, so the path never changes)
+      # and point apt at the first mirror that serves it.
+      - name: Pick a responsive Ubuntu mirror
         run: |
-          sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends wine64 libwine gcc-mingw-w64-x86-64 shellcheck
+          pkg=pool/universe/m/mingw-w64/mingw-w64-common_11.0.1-3build1_all.deb
+          for m in http://azure.archive.ubuntu.com/ubuntu/ \
+                   http://archive.ubuntu.com/ubuntu/ \
+                   https://mirrors.edge.kernel.org/ubuntu/ \
+                   https://mirror.us.leaseweb.net/ubuntu/ \
+                   https://ftp.uni-stuttgart.de/ubuntu/; do
+            if curl -fsS --max-time 15 -r 0-65535 -o /dev/null "$m$pkg"; then
+              echo "Using Ubuntu mirror $m"
+              if [ "$m" != http://azure.archive.ubuntu.com/ubuntu/ ]; then
+                echo "::warning::default Ubuntu mirrors unresponsive - using $m for this run"
+                printf '%s\tpriority:1\n' "$m" | sudo tee /etc/apt/apt-mirrors.txt
+              fi
+              exit 0
+            fi
+            echo "no answer from $m"
+          done
+          echo "::warning::no Ubuntu mirror answered - keeping the runner's defaults"
+
+      - name: Install Wine and a MinGW cross-compiler
+        timeout-minutes: 10
+        run: |
+          # Short per-request timeouts so a stalled mirror fails over quickly.
+          apt_opts="-q -o Acquire::http::Timeout=10 -o Acquire::https::Timeout=10 -o Acquire::Retries=3"
+          sudo apt-get update $apt_opts
+          sudo apt-get install -y $apt_opts --no-install-recommends wine64 libwine gcc-mingw-w64-x86-64 shellcheck
 
       - name: shellcheck
         run: shellcheck -x setup-dev-tools.sh setup-user.sh test/run-tests.sh test/e2e/run-e2e.sh test/e2e/stubs/* test/e2e/linuxbin/wsl.exe
