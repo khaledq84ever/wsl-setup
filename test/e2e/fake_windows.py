@@ -16,7 +16,7 @@ The fake wsl.exe implements only what wsl-setup.bat uses. Like real WSL, it
 forwards into the "distro" only the env vars named in WSLENV, which is what
 makes the credential-leak assertion meaningful.
 """
-import json, os, re, shutil, subprocess, sys, time
+import json, os, random, re, shutil, string, subprocess, sys, time
 try:
     import fcntl
 except ImportError:  # Windows
@@ -203,7 +203,22 @@ def fake_wsl(argv, env):
         return out(win_to_unix(cmd[2]) + "\n")
     if cmd[:1] == ["whoami"] or cmd == ["id", "-un"]:
         return out(user + "\n")
+    if cmd[:1] == ["mktemp"] and len(cmd) == 2 and cmd[1].startswith("/tmp/"):
+        # Like the real one: random name in place of the trailing Xs, file
+        # created empty and private. "mktemp_fail" in the state makes it fail.
+        with Locked() as s:
+            if s.get("mktemp_fail"):
+                return err("mktemp: failed to create file via template\n", 1)
+        stem = cmd[1].rstrip("X")
+        name = stem + "".join(random.choice(string.ascii_letters + string.digits)
+                              for _ in range(len(cmd[1]) - len(stem)))
+        fd = os.open(m(name), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        os.close(fd)
+        return out(name + "\n")
     if cmd[:1] == ["cp"]:
+        if not os.path.exists(m(cmd[2])):
+            # The .bat must only ever copy onto a file mktemp just made.
+            return err(f"fake wsl: cp target {cmd[2]!r} was not created by mktemp\n", 1)
         shutil.copyfile(cmd[1], m(cmd[2]))
         return out("")
     if cmd[:2] == ["sed", "-i"]:
@@ -219,7 +234,7 @@ def fake_wsl(argv, env):
         except OSError:
             pass
         return out("")
-    if cmd == ["bash", "/tmp/wsl_setup_devtools.sh"]:
+    if cmd[:1] == ["bash"] and len(cmd) == 2 and cmd[1].startswith("/tmp/wsl_setup_devtools."):
         # Don't really install Node/Docker/gh. Prove the plumbing instead: the
         # script that arrived (after wslpath/cp/sed) must be byte-identical
         # to the repo's LF setup-dev-tools.sh, and record who ran it.
@@ -254,7 +269,7 @@ def fake_powershell(argv, env, stdin_lines):
     if "OSVersion.Version.Build" in joined:
         return b"19045\r\n", b"", 0
     if "\\Lxss" in joined:  # "is this distro registered?" registry lookup
-        n = re.search(r"\$n = '([^']*)'", joined).group(1)
+        n = next((v for k, v in env.items() if k.upper() == "WSL_SETUP_DISTRO"), "")
         with Locked() as s:
             hit = n.lower() in [d.lower() for d in s["installed"]]
         return b"", b"", 0 if hit else 1

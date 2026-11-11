@@ -21,6 +21,7 @@ Fully automatic WSL setup for a Windows PC. Run one `.bat` file, pick any distro
 
 - **No plaintext credentials anywhere.** The password is read via PowerShell's masked `Read-Host` and base64-encoded *inside PowerShell*. Only the base64 text comes back to the batch script, so cmd never sees the raw password and can't mangle it (cmd silently drops `!` when delayed expansion is on). It's forwarded into the distro through `WSLENV`, never written to a log, temp file or disk, and never spliced into a shell command line. As soon as the account is created the forwarding is removed and your original `WSLENV` is restored, so later steps (including the dev-tools installer) never see it.
 - **Bypasses two documented first-install pitfalls:** uses `--web-download` (Microsoft's own fix for installs hanging at 0.0%) and checks the Windows build number up front (WSL needs build 19041+), instead of failing partway with a confusing error.
+- **No predictable temp files.** `setup-user.sh` runs as root, so it is copied into a file that `mktemp` has just created (random name, mode 0600, owned by root) rather than a fixed `/tmp` path that another user of an existing distro could create first and rewrite.
 - **Re-runs reliably.** Whether a distro is already installed is read from the registry (`HKCU\...\Lxss`), not by parsing `wsl -l -q`, whose UTF-16 output on older wsl.exe builds made the check fail and the re-run try to install it again.
 - **Explains the reboot case.** A first-ever WSL install on a machine can require a Windows restart partway through; if that happens, the script says so plainly and tells you to just re-run it afterward.
 
@@ -55,12 +56,13 @@ It runs the real `setup-user.sh` (with `useradd`/`chpasswd`/`usermod` stubbed an
 E2E=1 WINE=wine MINGW_CC=x86_64-w64-mingw32-gcc PWSH=pwsh bash test/run-tests.sh
 ```
 
-`test/e2e/run-e2e.sh` runs the **real `wsl-setup.bat` under Wine's `cmd.exe`**. `test/e2e/driver.py` types answers one prompt at a time, like a person would. Four scenarios are covered:
+`test/e2e/run-e2e.sh` runs the **real `wsl-setup.bat` under Wine's `cmd.exe`**. `test/e2e/driver.py` types answers one prompt at a time, like a person would. Five scenarios are covered:
 
 - **Live list:** UTF-16 live list → invalid number → injection attempt → menu number → bad username → password mismatch → install → account setup → verification.
 - **Re-run:** a re-run on an already-installed distro.
 - **Offline:** offline fallback menu.
 - **Install another:** a second distro in the same run.
+- **Copy failure:** the script can't be copied into the distro → clean stop, no account touched, credentials never forwarded.
 
 It checks that each menu number installs the right distro, `chpasswd` receives the exact password, `wsl.conf` and sudoers are written, and the credentials are forwarded into *only* the one `wsl.exe` call that needs them.
 
@@ -71,7 +73,7 @@ What's faked: `wsl.exe` (`test/e2e/fake_windows.py`), the registry lookup, the W
 Every pull request runs `.github/workflows/test.yml`:
 
 - **Linux:** shellcheck, plus the whole suite above including the Wine end-to-end test.
-- **Windows (real `cmd.exe` + Windows PowerShell 5.1):** every `.ps1` is parsed with 5.1. Then `test/e2e/windows/run_e2e_windows.py` runs the real `wsl-setup.bat` in a real console (ConPTY via `pywinpty`) through the same four scenarios. It types into the real masked `Read-Host` prompts, and the real registry lookup, `fltmc` and build check all run. Only `wsl.exe` is faked, by `WslShim.cs` → `fake_windows.py`. This job also checks the menu text itself, which Wine can't print.
+- **Windows (real `cmd.exe` + Windows PowerShell 5.1):** every `.ps1` is parsed with 5.1. Then `test/e2e/windows/run_e2e_windows.py` runs the real `wsl-setup.bat` in a real console (ConPTY via `pywinpty`) through the same five scenarios. It types into the real masked `Read-Host` prompts, and the real registry lookup, `fltmc` and build check all run. Only `wsl.exe` is faked, by `WslShim.cs` → `fake_windows.py`. This job also checks the menu text itself, which Wine can't print.
 
 What is still not covered anywhere: a real `wsl --install` and a real Linux distro. Those need a machine with WSL itself, which CI runners don't offer.
 
