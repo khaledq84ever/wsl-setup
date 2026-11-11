@@ -113,7 +113,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Only a helper: it runs `wsl --update` and registers Debian-13. The
+      # test does not need it to succeed - the .bat installs Debian itself -
+      # and its own distro download sometimes aborts ("aborted" x3 on
+      # 2026-11-11, fine on re-run), which must not fail the job.
       - uses: Vampire/setup-wsl@v7
+        continue-on-error: true
         with:
           distribution: Debian-13
 
