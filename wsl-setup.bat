@@ -72,7 +72,7 @@ REM --- The helper files must sit next to this script. Check them all up
 REM     front, so a partial download fails here with a clear list instead of
 REM     halfway through an install.
 set "missing="
-for %%F in (setup-user.sh list-distros.ps1 install-distro.ps1 wait-distro.ps1 wsl-status.ps1) do (
+for %%F in (setup-user.sh list-distros.ps1 install-distro.ps1 wait-distro.ps1 wsl-status.ps1 start.bat) do (
     if not exist "%~dp0%%F" set "missing=!missing! %%F"
 )
 if defined missing (
@@ -149,6 +149,10 @@ echo.
 for /l %%i in (1,1,!DISTROCOUNT!) do (
     echo   %%i.  !DISTROFRIENDLY_%%i!
 )
+REM  One number past the list: open WSL instead of installing anything.
+set /a STARTNUM=DISTROCOUNT+1
+echo.
+echo   !STARTNUM!.  Start WSL - open the distro you already installed
 echo   0.  Exit
 echo.
 
@@ -166,10 +170,20 @@ if errorlevel 1 goto BADCHOICE
 REM  Digits only from here on. A number past the end of the list simply has no
 REM  DISTRONAME_n, which also covers the old GTR check, including numbers
 REM  too big for cmd's 32-bit compare.
+if "!choice!"=="!STARTNUM!" goto STARTWSL
 if not defined DISTRONAME_!choice! goto BADCHOICE
 set "selectedName=!DISTRONAME_%choice%!"
 set "selectedFriendly=!DISTROFRIENDLY_%choice%!"
 goto GOTCHOICE
+
+REM --- Menu entry "Start WSL": the shipped start.bat opens the default
+REM     distro in this (already elevated) window. If WSL cannot start it says why and waits
+REM     for a key itself; either way the menu comes back afterwards.
+:STARTWSL
+echo.
+call "%~dp0start.bat"
+title WSL Setup
+goto MENU
 
 :BADCHOICE
 echo.
@@ -446,10 +460,9 @@ wsl.exe --status
 echo.
 wsl.exe --list --verbose
 echo.
-if exist "%~dp0start-wsl.bat" (
-    echo To open !selectedFriendly! later as Administrator, run start-wsl.bat
-    echo next to this script - or just type "wsl" in any terminal.
-)
+echo To open !selectedFriendly! later as Administrator, run start.bat next to
+echo this script, or pick "Start WSL" in this menu. If WSL cannot start,
+echo it tells you why. Or just type "wsl" in any terminal.
 
 echo.
 echo %CLR_GREEN%=========================================================%CLR_RESET%
