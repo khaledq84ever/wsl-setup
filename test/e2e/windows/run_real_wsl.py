@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """run_real_wsl.py - run the REAL wsl-setup.bat against REAL WSL: Microsoft's
-wsl.exe and a real Linux distro (installed beforehand by the CI job with
-Vampire/setup-wsl). Nothing is faked. The .bat takes its "already installed"
-path, so `wsl --install` itself is the one step still not exercised here.
+wsl.exe and a real Linux distro. Nothing is faked. Round 1 picks WSL_DISTRO
+(default Debian) from the live menu, so the .bat really runs
+`wsl --install -d Debian --no-launch --web-download` and waits for it; round 2
+runs the .bat again and takes the "already installed" path. The CI job uses
+Vampire/setup-wsl first, to make sure WSL itself works on the runner and so
+another distro is registered (the .bat must take over the machine default).
 
 Checked inside the distro afterwards: the account exists, its password hash
 matches exactly what was typed (cmd/PowerShell special characters included),
@@ -83,7 +86,9 @@ def menu_number(distro):
 
 
 def run_bat(distro, round_name):
-    print(f"=== REAL WSL {round_name}: wsl-setup.bat on the registered {distro} ===", flush=True)
+    was_installed = distro.lower() in [n.lower() for n in registered()]
+    print(f"=== REAL WSL {round_name}: wsl-setup.bat, {distro} "
+          f"{'already registered' if was_installed else 'not installed yet'} ===", flush=True)
     num = menu_number(distro)
     con = Console(["cmd.exe", "/c", os.path.join(REPO, "wsl-setup.bat")], REPO, dict(os.environ))
     err = con.drive([
@@ -94,7 +99,11 @@ def run_bat(distro, round_name):
     open(log, "w", encoding="utf-8").write(out)
     before = failed
     check(err is None, f"driver: {err}")
-    check("is already installed - skipping install," in out, "not detected as already installed")
+    if was_installed:
+        check("is already installed - skipping install," in out, "not detected as already installed")
+    else:
+        check("Installing " in out and "already installed" not in out, "did not run the install")
+        check(distro.lower() in [n.lower() for n in registered()], f"{distro} not registered after the install")
     for s in (f'[OK] User "{USER}" is registered in', f'[OK] "{USER}" is set as the default user',
               '[OK] Typing "wsl" in any cmd/PowerShell window now logs straight'):
         check(s in out, f"console lacks {s!r}")
@@ -126,9 +135,8 @@ def check_distro(distro):
 
 
 def main():
-    distro = os.environ.get("WSL_DISTRO") or next(iter(registered()), None)
-    if not distro or distro not in registered():
-        sys.exit(f"no registered WSL distro to test (WSL_DISTRO={distro!r}, registered={registered()})")
+    distro = os.environ.get("WSL_DISTRO", "Debian")
+    print(f"registered before the test: {registered()}", flush=True)
     shown = []
     for rnd in ("first-run", "re-run"):
         broke, out = run_bat(distro, rnd)
