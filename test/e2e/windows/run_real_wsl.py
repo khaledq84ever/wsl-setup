@@ -94,7 +94,7 @@ def run_bat(distro, round_name, dev_tools=False):
     con = Console(["cmd.exe", "/c", os.path.join(REPO, "wsl-setup.bat")], REPO, dict(os.environ))
     dev = ([[DEV, "y"], ["Dev-tools setup finished.", None], [KEY, ""]] if dev_tools else [[DEV, "n"]])
     err = con.drive([
-        [MENU, num], [UPROMPT, USER], [PWD1, PW], [PWD2, PW],
+        [MENU, "1"], [MENU, num], [UPROMPT, USER], [PWD1, PW], [PWD2, PW],
         ["Registration complete.", None], [KEY, ""]] + dev + [[AGAIN, "n"], ["Done.", None], [KEY, ""]])
     out = con.text()
     log = os.path.join(tempfile.gettempdir(), f"real-wsl-{round_name}.txt")

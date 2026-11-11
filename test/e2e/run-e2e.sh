@@ -138,7 +138,7 @@ DEV='"[y/n]: "'; AGAIN='"(y/n): "'
 
 echo "=== E2E 1: live list (UTF-16), bad input first, then menu 6 -> Ubuntu-24.04 ==="
 run_scenario happy '{"installed":[],"online":"utf16"}' "[
-  [$MENU, \"99\"], [$KEY, \"\"],
+  [$MENU, \"1\"], [$MENU, \"99\"], [$KEY, \"\"],
   [$MENU, \"1&echo INJECTED\"], [$KEY, \"\"],
   [$MENU, \"6\"],
   [$USER, \"Dev\"], [$USER, \"dev\"],
@@ -180,7 +180,7 @@ end_scenario
 
 echo "=== E2E 2: re-run on an already-installed distro (menu 2 -> Debian) ==="
 run_scenario rerun '{"installed":["Debian"],"online":"utf16"}' "[
-  [$MENU, \"2\"], [$USER, \"dev\"], [\"@PASSWORD\", $PWJ],
+  [$MENU, \"1\"], [$MENU, \"2\"], [$USER, \"dev\"], [\"@PASSWORD\", $PWJ],
   [\"Registration complete.\", null], [$KEY, \"\"], [$DEV, \"n\"], [$AGAIN, \"n\"], [\"Done.\", null], [$KEY, \"\"]]"
 has 'Debian GNU/Linux is already installed - skipping install,'
 [ -z "$(calls installs)" ] && ok || bad "re-run tried to install [$(calls installs)]"
@@ -191,7 +191,7 @@ end_scenario
 
 echo "=== E2E 3: online list unavailable -> fallback menu, 1 -> Ubuntu ==="
 run_scenario offline '{"installed":[],"online":"fail","no_store_wsl":true}' "[
-  [\"Could not read the live distro list\", null], [$KEY, \"\"],
+  [$MENU, \"1\"], [\"Could not read the live distro list\", null], [$KEY, \"\"],
   [$MENU, \"1\"], [$USER, \"dev\"], [\"@PASSWORD\", $PWJ],
   [\"Registration complete.\", null], [$KEY, \"\"], [$DEV, \"n\"], [$AGAIN, \"n\"], [\"Done.\", null], [$KEY, \"\"]]"
 has 'WININET_E_NAME_NOT_RESOLVED'
@@ -206,7 +206,7 @@ end_scenario
 
 echo "=== E2E 4: install another - second distro, list fetched only once ==="
 run_scenario another '{"installed":[],"online":"utf8"}' "[
-  [$MENU, \"4\"], [$USER, \"dev\"], [\"@PASSWORD\", $PWJ],
+  [$MENU, \"1\"], [$MENU, \"4\"], [$USER, \"dev\"], [\"@PASSWORD\", $PWJ],
   [\"Registration complete.\", null], [$KEY, \"\"], [$DEV, \"n\"], [$AGAIN, \"y\"],
   [$MENU, \"2\"], [$USER, \"ops\"], [\"@PASSWORD\", $PWJ],
   [\"Registration complete.\", null], [$KEY, \"\"], [$DEV, \"n\"], [$AGAIN, \"n\"], [\"Done.\", null], [$KEY, \"\"]]"
@@ -220,7 +220,7 @@ end_scenario
 
 echo "=== E2E 5: script cannot be copied into the distro -> clean stop, nothing run ==="
 run_scenario copyfail '{"installed":["Debian"],"online":"utf16","mktemp_fail":true}' "[
-  [$MENU, \"2\"], [$USER, \"dev\"], [\"@PASSWORD\", $PWJ],
+  [$MENU, \"1\"], [$MENU, \"2\"], [$USER, \"dev\"], [\"@PASSWORD\", $PWJ],
   [\"Could not copy setup-user.sh\", null], [$KEY, \"\"], [$MENU, \"0\"], [\"Done.\", null], [$KEY, \"\"]]"
 has 'Could not copy setup-user.sh into Debian GNU/Linux - no account'
 [ ! -e "$ST/root-Debian/chpasswd.log" ] && ok || bad "an account was touched although the copy failed"
