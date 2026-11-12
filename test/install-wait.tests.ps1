@@ -69,8 +69,25 @@ $sw.Stop()
 if ($r.Code -eq 1 -and $sw.Elapsed.TotalSeconds -lt 15) { Ok } else { Bad "timeout: exit $($r.Code) after $([int]$sw.Elapsed.TotalSeconds)s" }
 
 $key = Join-Path $tmp 'reboot-pending'; New-Item -ItemType File $key | Out-Null
-$r = Run $wait @('-Distro', 'Debian', '-WslExe', $never, '-IntervalSec', '0.1', '-RebootKeys', $key)
+# -TimeoutSec so that a lost restart check fails here in seconds, not after
+# the default five minutes.
+$r = Run $wait @('-Distro', 'Debian', '-WslExe', $never, '-TimeoutSec', '2', '-IntervalSec', '0.1', '-RebootKeys', $key)
 if ($r.Code -eq 2) { Ok } else { Bad "reboot pending: exit $($r.Code), want 2" }
+
+# wsl.exe exits with -1 for its own errors (distro not found, service
+# failure). A /bin/sh fake cannot produce a negative code, a PowerShell one
+# can: -1 is a failed probe, never "ready".
+$minus1 = Join-Path $tmp 'wsl-minus1.ps1'
+Set-Content -LiteralPath $minus1 -Value 'exit -1'
+$r = Run $wait @('-Distro', 'Debian', '-WslExe', $minus1, '-TimeoutSec', '1', '-IntervalSec', '0.2', '-RebootKeys', (Join-Path $tmp 'no-such-key'))
+if ($r.Code -eq 1) { Ok } else { Bad "probe exits -1: exit $($r.Code), want 1 (not ready)" }
+
+# A distro that answers is ready, whatever Windows says about a restart: the
+# pending-restart key (set by any unrelated Windows update) must only be
+# consulted after a failed probe.
+$ready = New-Fake 'wsl-ready' 'exit 0'
+$r = Run $wait @('-Distro', 'Debian', '-WslExe', $ready, '-IntervalSec', '0.1', '-RebootKeys', $key)
+if ($r.Code -eq 0) { Ok } else { Bad "ready distro with a restart pending: exit $($r.Code), want 0" }
 
 Remove-Item -Recurse -Force $tmp
 Write-Host "INSTALL-WAIT RESULTS: $script:pass passed, $script:fail failed"
