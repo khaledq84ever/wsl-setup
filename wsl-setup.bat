@@ -387,13 +387,15 @@ REM  The copy goes into a file that root's own mktemp just created: a random
 REM  name, owned by root, mode 0600. A fixed /tmp name could be created first
 REM  by another user of an already-installed distro, who would then own the
 REM  file and could rewrite it before it runs here as root.
+REM  Results are compared with 0, not `if errorlevel 1`: wsl.exe exits with
+REM  -1 for its own errors, which `if errorlevel 1` treats as success.
 set "TMPSCRIPT="
 for /f "usebackq delims=" %%T in (`wsl.exe -d !selectedName! -u root -- mktemp /tmp/wsl_setup_user.XXXXXXXX`) do set "TMPSCRIPT=%%T"
 if not defined TMPSCRIPT goto COPYFAIL
 wsl.exe -d !selectedName! -u root -- cp "!SCRIPTWSL!" "!TMPSCRIPT!"
-if errorlevel 1 goto COPYFAIL
+if not "!errorlevel!"=="0" goto COPYFAIL
 wsl.exe -d !selectedName! -u root -- sed -i "s/\r$//" "!TMPSCRIPT!"
-if errorlevel 1 goto COPYFAIL
+if not "!errorlevel!"=="0" goto COPYFAIL
 REM  Forward the credentials into exactly this one call, then stop at once.
 REM  Otherwise every later wsl.exe call in this window - including
 REM  setup-dev-tools.sh, which pipes installers from the internet into a
@@ -517,9 +519,9 @@ if not defined DEVSCRIPTWSL goto DEVCOPYFAIL
 for /f "usebackq delims=" %%T in (`wsl.exe -d !selectedName! -- mktemp /tmp/wsl_setup_devtools.XXXXXXXX`) do set "DEVTMP=%%T"
 if not defined DEVTMP goto DEVCOPYFAIL
 wsl.exe -d !selectedName! -- cp "!DEVSCRIPTWSL!" "!DEVTMP!"
-if errorlevel 1 goto DEVCOPYFAIL
+if not "!errorlevel!"=="0" goto DEVCOPYFAIL
 wsl.exe -d !selectedName! -- sed -i "s/\r$//" "!DEVTMP!"
-if errorlevel 1 goto DEVCOPYFAIL
+if not "!errorlevel!"=="0" goto DEVCOPYFAIL
 wsl.exe -d !selectedName! -- bash "!DEVTMP!"
 set "devResult=!errorlevel!"
 wsl.exe -d !selectedName! -- rm -f "!DEVTMP!" >nul 2>&1

@@ -203,7 +203,8 @@ def fake_wsl(argv, env):
         installed = list(s["installed"])
         distro = distro or s["default"]
     if distro not in installed:
-        return err("There is no distribution with the supplied name.\r\n", 1)
+        # Real wsl.exe exits with -1 here, which `if errorlevel 1` does not catch.
+        return err("There is no distribution with the supplied name.\r\n", -1)
     root = distro_root(distro)
     if user is None:
         user = read_conf_default(root) or "root"

@@ -376,6 +376,14 @@ def main():
         check("[ERROR]" not in out and KEY not in out, "error or pause on the named path")
         if failed > before: shown.append(st)
 
+        print("=== WIN E2E 8c: start.bat with something that is not a distro name -> refused ===", flush=True)
+        st, out = run_scenario("start-badname", {"installed": ["Debian"], "default": "Debian"}, [[KEY, ""]],
+                               work, bindir, bash, bat="start.bat", args=("no/such",))
+        before = failed
+        check("[ERROR] That is not a distro name." in out, "bad distro name not refused")
+        check(not os.path.exists(os.path.join(st, "calls.jsonl")) or calls(st) == [], "wsl.exe was run with a bad name")
+        if failed > before: shown.append(st)
+
         print("=== WIN E2E 9: main menu 2 = Start WSL, then 1 -> distro list -> 0 Back -> 0 Exit ===", flush=True)
         st, out = run_scenario("menu-start", {"installed": ["Debian"], "default": "Debian", "online": "utf8"}, [
             [MENU, "2"], ["fake shell as root", None], [MENU, "1"], [MENU, "0"], [MENU, "0"], ["Done.", None], [KEY, ""]], work, bindir, bash)

@@ -41,18 +41,31 @@ if errorlevel 1 goto NODISTRO
 REM  A quick no-op first: if the distro cannot start, wsl.exe prints its own
 REM  error here and the reason is still on screen for the hints below.
 if defined WSL_START_DISTRO goto NAMED
+REM  Not `if errorlevel 1`: wsl.exe exits with -1 for its own errors (such
+REM  as WSL_E_DISTRO_NOT_FOUND), and -1 is not ">= 1".
 wsl.exe -- true
-if errorlevel 1 goto CANTSTART
+if not "%errorlevel%"=="0" goto CANTSTART
 
 wsl.exe
 exit /b
 
 :NAMED
-wsl.exe -d "%WSL_START_DISTRO%" -- true
-if errorlevel 1 goto CANTSTART
+REM  The name goes onto the wsl.exe command line as it is - wsl.exe looks
+REM  for a distro whose name includes the quotes if it is quoted - so only
+REM  a plain distro name is let through. Checked from an env var, never
+REM  spliced into the PowerShell command.
+powershell -NoProfile -Command "if ($env:WSL_START_DISTRO -cmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') { exit 0 } else { exit 1 }"
+if errorlevel 1 goto BADNAME
+wsl.exe -d %WSL_START_DISTRO% -- true
+if not "%errorlevel%"=="0" goto CANTSTART
 
-wsl.exe -d "%WSL_START_DISTRO%"
+wsl.exe -d %WSL_START_DISTRO%
 exit /b
+
+:BADNAME
+echo.
+echo [ERROR] That is not a distro name. Use a name from:  wsl --list --verbose
+goto FAIL
 
 :NOWSL
 echo.
