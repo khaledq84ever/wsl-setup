@@ -550,7 +550,7 @@ echo %CLR_CYAN%=========================================================%CLR_RES
 echo   Setup finished. What next?
 echo %CLR_CYAN%=========================================================%CLR_RESET%
 echo.
-echo   1.  Start WSL now
+echo   1.  Start WSL now - open !selectedFriendly!
 echo   2.  Install another distro
 echo   0.  Exit
 echo.
@@ -566,12 +566,14 @@ echo.
 echo %CLR_RED%[ERROR]%CLR_RESET% "!again!" is not a valid option.
 goto ASKAGAIN
 
-REM --- "Start WSL now": start.bat opens the default distro - the one just
-REM     set up - in this window; typing exit there comes back to this menu.
+REM --- "Start WSL now": start.bat opens the distro just set up - by name,
+REM     because it is not the default yet if the checks above ended early -
+REM     in this window; typing exit there comes back to this menu.
 REM     If WSL cannot start, start.bat says why and waits for a key itself.
+REM     The name is one this tool listed itself: letters, digits, . _ -
 :STARTAFTER
 echo.
-call "%~dp0start.bat"
+call "%~dp0start.bat" "!selectedName!"
 title WSL Setup
 goto ASKAGAIN
 

@@ -9,10 +9,15 @@ REM the path goes to PowerShell via an env var, so folder names with an
 REM apostrophe still work. Distros belong to one Windows account, so this
 REM opens the distros of the account that approves the UAC prompt - the same
 REM one wsl-setup.bat installed them for.
+REM
+REM Usage: start.bat [distro]   - with no name it opens the default distro.
+REM wsl-setup.bat passes the name of the distro it has just set up, so its
+REM "Start WSL now" opens exactly that one even if another is the default.
+set "WSL_START_DISTRO=%~1"
 fltmc >nul 2>&1
 if not "%errorlevel%"=="0" (
     set "WSL_START_SELF=%~f0"
-    powershell -NoProfile -Command "try { Start-Process -FilePath $env:WSL_START_SELF -Verb RunAs -ErrorAction Stop } catch { exit 1 }"
+    powershell -NoProfile -Command "$a = @{ FilePath = $env:WSL_START_SELF; Verb = 'RunAs' }; if ($env:WSL_START_DISTRO) { $a.ArgumentList = $env:WSL_START_DISTRO }; try { Start-Process @a -ErrorAction Stop } catch { exit 1 }"
     if errorlevel 1 (
         echo Administrator rights were not granted - WSL was not started.
         pause
@@ -35,10 +40,18 @@ if errorlevel 1 goto NODISTRO
 
 REM  A quick no-op first: if the distro cannot start, wsl.exe prints its own
 REM  error here and the reason is still on screen for the hints below.
+if defined WSL_START_DISTRO goto NAMED
 wsl.exe -- true
 if errorlevel 1 goto CANTSTART
 
 wsl.exe
+exit /b
+
+:NAMED
+wsl.exe -d "%WSL_START_DISTRO%" -- true
+if errorlevel 1 goto CANTSTART
+
+wsl.exe -d "%WSL_START_DISTRO%"
 exit /b
 
 :NOWSL

@@ -65,11 +65,13 @@ chmod 0440 "$SUDOERS_DIR/$u"
 # may have added, silently disabling Docker's init on the next boot. Instead,
 # set default= under [user] in place and leave every other section intact.
 if [ -f "$CONF_FILE" ]; then
-    if grep -q '^\[user\]' "$CONF_FILE"; then
-        if grep -q '^default=' "$CONF_FILE"; then
-            sed -i "s/^default=.*/default=$u/" "$CONF_FILE"
+    # Whitespace-tolerant, as WSL itself is: a hand-edited "  default = old"
+    # must be replaced, not left in place next to a second default= line.
+    if grep -Eq '^[[:space:]]*\[user\]' "$CONF_FILE"; then
+        if grep -Eq '^[[:space:]]*default[[:space:]]*=' "$CONF_FILE"; then
+            sed -i -E "s/^[[:space:]]*default[[:space:]]*=.*/default=$u/" "$CONF_FILE"
         else
-            sed -i "/^\[user\]/a default=$u" "$CONF_FILE"
+            sed -i -E "/^[[:space:]]*\[user\]/a default=$u" "$CONF_FILE"
         fi
     else
         printf '\n[user]\ndefault=%s\n' "$u" >> "$CONF_FILE"
