@@ -1,5 +1,7 @@
 # install-wait.tests.ps1 - run the real install-distro.ps1 and wait-distro.ps1
-# against fake wsl.exe scripts. Linux/pwsh only (fakes are /bin/sh scripts).
+# against fake wsl.exe scripts. The fakes are /bin/sh scripts; on Windows
+# (Windows PowerShell 5.1 or pwsh) each gets a .cmd wrapper that runs it with
+# Git's sh.exe, so the same tests run where the shipped scripts really run.
 $ErrorActionPreference = 'Stop'
 $script:pass = 0; $script:fail = 0
 function Ok  { $script:pass++ }
@@ -9,22 +11,33 @@ $root = Join-Path $PSScriptRoot '..'
 $install = Join-Path $root 'install-distro.ps1'
 $wait = Join-Path $root 'wait-distro.ps1'
 $pwshExe = (Get-Process -Id $PID).Path
-$tmp = Join-Path ([IO.Path]::GetTempPath()) ("instwait-" + [guid]::NewGuid())
+$onWindows = $env:OS -eq 'Windows_NT'   # $IsWindows does not exist in 5.1
+# Forward slashes: these paths are also written into the sh fakes, where a
+# backslash would be an escape character.
+$tmp = (Join-Path ([IO.Path]::GetTempPath()) ("instwait-" + [guid]::NewGuid())) -replace '\\', '/'
 New-Item -ItemType Directory $tmp | Out-Null
+$sh = $null
+if ($onWindows) {
+    # Git's sh, by full path: a bare "bash"/"sh" could be WSL's launcher.
+    $sh = Join-Path $env:ProgramFiles 'Git\bin\sh.exe'
+    if (-not (Test-Path -LiteralPath $sh)) { $sh = (Get-Command sh.exe -ErrorAction Stop).Source }
+}
 
 function New-Fake([string]$name, [string]$body) {
-    $f = Join-Path $tmp $name
+    $f = "$tmp/$name"
     Set-Content -Path $f -Value ("#!/bin/sh`n" + $body + "`n") -NoNewline
-    chmod +x $f
-    $f
+    if (-not $onWindows) { chmod +x $f; return $f }
+    Set-Content -Path "$f.cmd" -Value ("@`"$sh`" `"%~dp0$name`" %*`r`n@exit /b %errorlevel%`r`n") -NoNewline
+    "$f.cmd"
 }
 function Run([string]$script, [string[]]$a) {
-    $out = & $pwshExe -NoProfile -File $script @a 2>&1 | Out-String
+    # Bypass: the -1 fake below is a .ps1, which a default Windows policy blocks.
+    $out = & $pwshExe -NoProfile -ExecutionPolicy Bypass -File $script @a 2>&1 | Out-String
     [pscustomobject]@{ Out = $out; Code = $LASTEXITCODE }
 }
 
 Write-Host '=== INSTALL-DISTRO ==='
-$argsFile = Join-Path $tmp 'install-args'
+$argsFile = "$tmp/install-args"
 $ok = New-Fake 'wsl-ok' "echo `"`$*`" > '$argsFile'; for p in 10.0 55.5 100.0; do echo `"Downloading: `$p%`"; sleep 0.2; done; exit 0"
 $r = Run $install @('-Distro', 'Ubuntu-24.04', '-Friendly', "Ubuntu 24.04 LTS (it's fine)", '-WslExe', $ok, '-PollMs', '50')
 if ($r.Code -eq 0) { Ok } else { Bad "success case: exit $($r.Code) [$($r.Out)]" }
@@ -32,7 +45,7 @@ $got = (Get-Content -Raw $argsFile).Trim()
 if ($got -ceq '--install -d Ubuntu-24.04 --no-launch --web-download') { Ok } else { Bad "wsl.exe got [$got]" }
 
 # Failure, with the error written as UTF-16LE like an old wsl.exe would.
-$errFile = Join-Path $tmp 'err-utf16'
+$errFile = "$tmp/err-utf16"
 [IO.File]::WriteAllBytes($errFile, [Text.Encoding]::Unicode.GetBytes("There is no distribution with the supplied name.`r`nError code: Wsl/InstallDistro/WSL_E_DISTRO_NOT_FOUND`r`n"))
 $bad = New-Fake 'wsl-bad' "cat '$errFile'; exit 5"
 $r = Run $install @('-Distro', 'Nope', '-WslExe', $bad, '-PollMs', '50')
@@ -54,8 +67,8 @@ $r = Run $install @('-Distro', 'X', '-WslExe', (Join-Path $tmp 'missing'))
 if ($r.Code -eq 1) { Ok } else { Bad "missing wsl.exe: exit $($r.Code), want 1" }
 
 Write-Host '=== WAIT-DISTRO ==='
-$count = Join-Path $tmp 'count'
-$waitArgs = Join-Path $tmp 'wait-args'
+$count = "$tmp/count"
+$waitArgs = "$tmp/wait-args"
 $third = New-Fake 'wsl-third' "echo `"`$*`" > '$waitArgs'; n=`$(cat '$count' 2>/dev/null || echo 0); n=`$((n+1)); echo `$n > '$count'; [ `$n -ge 3 ]"
 $r = Run $wait @('-Distro', 'Debian', '-WslExe', $third, '-IntervalSec', '0.1', '-RebootKeys', (Join-Path $tmp 'no-such-key'))
 if ($r.Code -eq 0) { Ok } else { Bad "ready on 3rd try: exit $($r.Code)" }

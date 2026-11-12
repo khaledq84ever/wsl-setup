@@ -10,8 +10,10 @@ survives - that is a gap in the tests, not in wait-distro.ps1.
 Not part of test/run-tests.sh (it takes a few minutes: one mutant can only be
 caught by the tests hanging). Run it after changing wait-distro.ps1 or its
 tests:   python3 test/mutation/wait-distro.py        (PWSH=... if not on PATH)
+PWSH=powershell runs it on Windows PowerShell 5.1, as the CI "mutation" job does.
 """
-import os, subprocess, sys
+import os, signal, subprocess, sys
+HANG = int(os.environ.get("MUTATION_HANG_SEC", "90"))   # a run of the tests takes a few seconds
 repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 pwsh = os.environ.get("PWSH", "pwsh")
 path = os.path.join(repo, "wait-distro.ps1")
@@ -38,14 +40,24 @@ try:
     for name, old, new in M:
         assert norm.count(old) == 1, (name, norm.count(old))
         open(path, "w", newline="\n").write(norm.replace(old, new))
+        p = subprocess.Popen([pwsh, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                              os.path.join(repo, "test", "install-wait.tests.ps1")],
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                             start_new_session=(os.name != "nt"))
         try:
-            r = subprocess.run([pwsh, "-NoProfile", "-File", os.path.join(repo, "test", "install-wait.tests.ps1")],
-                               capture_output=True, text=True, timeout=90)
-            fails = [l.strip() for l in r.stdout.splitlines() if "FAIL" in l or l.strip().startswith("BAD")]
-            verdict = "KILLED" if r.returncode != 0 else "SURVIVED"
+            out, _ = p.communicate(timeout=HANG)
+            fails = [l.strip() for l in out.splitlines() if "FAIL" in l]
+            verdict = "KILLED" if p.returncode != 0 else "SURVIVED"
             detail = fails[0][:110] if fails else ""
         except subprocess.TimeoutExpired:
-            verdict, detail = "KILLED (tests hang > 90 s)", ""
+            # A mutant that never returns leaves the test's own child looping
+            # forever: stop the whole tree, not just the test process.
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/T", "/F", "/PID", str(p.pid)], capture_output=True)
+            else:
+                os.killpg(p.pid, signal.SIGKILL)
+            p.communicate()
+            verdict, detail = f"KILLED (tests hang > {HANG} s)", ""
         survived += verdict == "SURVIVED"
         print(f"{verdict:28} {name}   {detail}", flush=True)
 finally:

@@ -102,6 +102,33 @@ jobs:
           E2E_STEP_TIMEOUT: "120"
         run: python test/e2e/windows/run_e2e_windows.py
 
+  # The unit tests of install-distro.ps1 / wait-distro.ps1 on the PowerShell
+  # that really runs them (5.1), then the mutation run: one planted bug at a
+  # time in wait-distro.ps1 (exit codes, probe result, restart check,
+  # timeout) - every one must make those tests fail.
+  mutation:
+    name: Windows PowerShell 5.1 - unit tests + mutation run (wait-distro.ps1)
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: install-wait unit tests on Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          Write-Host "PowerShell $($PSVersionTable.PSVersion)"
+          powershell -NoProfile -ExecutionPolicy Bypass -File test/install-wait.tests.ps1
+          exit $LASTEXITCODE
+
+      - name: Mutation run - every planted bug must be caught
+        env:
+          PWSH: powershell
+        run: python test/mutation/wait-distro.py
+
   # No fakes at all: Microsoft's wsl.exe and a real distro. setup-wsl makes
   # sure WSL works on the hosted runner (and registers Debian-13, so the .bat
   # has to take over the machine default); the .bat then really installs
