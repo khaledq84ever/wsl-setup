@@ -340,6 +340,41 @@ def main():
         check("Registration complete." not in out, "reported success after a failed copy")
         if failed > before: shown.append(st)
 
+        # wsl.exe itself failing (exit code -1, not a Linux exit code) at each
+        # copy step: `if errorlevel 1` would miss -1 and carry on to run an
+        # empty or half-copied script as root.
+        for step, rule in (("cp", "cp:wsl_setup_user"), ("sed", "sed:wsl_setup_user")):
+            print(f"=== WIN E2E 5-{step}: wsl.exe exits -1 at the {step} of setup-user.sh -> clean stop ===", flush=True)
+            st, out = run_scenario(f"copyfail-{step}", {"installed": ["Debian"], "online": "utf16", "wsl_fail": [rule]}, [
+                [MENU, "1"], [MENU, "2"], [USER, "dev"], [PWD1, PW], [PWD2, PW],
+                ["Could not copy setup-user.sh", None], [KEY, ""], [MENU, "0"], ["Done.", None], [KEY, ""]],
+                work, bindir, bash)
+            before = failed
+            check("Wsl/Service/E_UNEXPECTED" in out, "wsl.exe's own error not shown")
+            check("Could not copy setup-user.sh into Debian GNU/Linux - no account" in out, "copy failure not reported")
+            check(not any(c["argv"][-2:-1] == ["bash"] for c in calls(st)), "the script was run although the copy failed")
+            check(not os.path.exists(os.path.join(st, "root-Debian", "chpasswd.log")), "account touched after failed copy")
+            check(not any("PASS_B64" in c["forwarded"] or "USER_B64" in c["forwarded"] for c in calls(st)),
+                  "credentials forwarded although nothing should run")
+            check(os.listdir(os.path.join(st, "root-Debian", "tmp")) == [], "temp script left behind")
+            check("Registration complete." not in out, "reported success after a failed copy")
+            if failed > before: shown.append(st)
+
+        for step, rule in (("cp", "cp:wsl_setup_devtools"), ("sed", "sed:wsl_setup_devtools")):
+            print(f"=== WIN E2E 5-dev-{step}: wsl.exe exits -1 at the {step} of setup-dev-tools.sh -> warned, not run ===", flush=True)
+            st, out = run_scenario(f"devcopyfail-{step}", {"installed": ["Debian"], "online": "utf16", "wsl_fail": [rule]}, [
+                [MENU, "1"], [MENU, "2"], [USER, "dev"], [PWD1, PW], [PWD2, PW],
+                ["Registration complete.", None], [KEY, ""], [DEV, "y"],
+                ["Could not copy setup-dev-tools.sh", None], [KEY, ""], [MENU, "0"], ["Done.", None], [KEY, ""]],
+                work, bindir, bash)
+            before = failed
+            check("were NOT installed" in out, "dev-tools copy failure not reported")
+            check("Dev-tools setup finished." not in out, "reported dev tools as installed")
+            check(not os.path.exists(os.path.join(st, "devtools.json")), "dev-tools script was run although the copy failed")
+            check(read(os.path.join(st, "root-Debian", "chpasswd.log")).strip("\n") == "dev:" + PW, "account was not set up")
+            check(os.listdir(os.path.join(st, "root-Debian", "tmp")) == [], "temp script left behind")
+            if failed > before: shown.append(st)
+
         print("=== WIN E2E 6: start.bat, no distro for this account -> says why, waits ===", flush=True)
         st, out = run_scenario("start-nodistro", {"installed": [], "default": ""}, [[KEY, ""]],
                                work, bindir, bash, bat="start.bat")
