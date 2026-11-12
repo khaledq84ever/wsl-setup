@@ -105,7 +105,7 @@ jobs:
   # The PowerShell helpers on the PowerShell that really runs them (5.1):
   # first their unit tests, then the mutation run - one planted bug at a time
   # (including the mutants that undo a 5.1-only workaround), and every one
-  # must make that helper's tests fail. Two jobs side by side, because a
+  # must make that helper's tests fail. Three jobs side by side, because a
   # mutation run takes minutes.
   mutation:
     name: Windows PowerShell 5.1 - unit tests + mutation run (${{ matrix.helpers }})
@@ -117,8 +117,10 @@ jobs:
         include:
           - helpers: wait install
             tests: install-wait
-          - helpers: list status
-            tests: list-distros wsl-status
+          - helpers: list
+            tests: list-distros
+          - helpers: status
+            tests: wsl-status
     steps:
       - uses: actions/checkout@v7
 

@@ -98,10 +98,15 @@ TARGETS = {
 }
 
 
-def run_tests(test):
-    """-> (killed, detail). Stops the whole process tree if the tests hang."""
+def run_tests(test, fail_fast=True):
+    """-> (killed, detail). Stops the whole process tree if the tests hang.
+    With a mutant in place the tests stop at their first failure (see
+    helpers.ps1): that is all a mutation run needs, and it is much faster."""
+    env = dict(os.environ)
+    if fail_fast:
+        env["TEST_FAIL_FAST"] = "1"
     p = subprocess.Popen([pwsh, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", os.path.join(repo, "test", test)],
-                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env,
                          start_new_session=(os.name != "nt"))
     try:
         out, _ = p.communicate(timeout=HANG)
@@ -124,7 +129,7 @@ def mutate(key):
     orig = open(path, "rb").read()
     norm = orig.decode().replace("\r\n", "\n")
     print(f"=== {target}  (tests: {test}) ===", flush=True)
-    killed, detail = run_tests(test)
+    killed, detail = run_tests(test, fail_fast=False)
     if killed:
         sys.exit(f"the tests fail without any mutant: {detail} - fix that first")
     ran = survived = 0

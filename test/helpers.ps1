@@ -4,7 +4,13 @@
 $ErrorActionPreference = 'Stop'
 $script:pass = 0; $script:fail = 0
 function Ok  { $script:pass++ }
-function Bad { param($m) $script:fail++; Write-Host "  FAIL: $m" }
+# TEST_FAIL_FAST=1 (set by test/mutation/mutate.py): stop at the first
+# failure - a mutation run only needs to know that the tests noticed.
+function Bad {
+    param($m)
+    $script:fail++; Write-Host "  FAIL: $m"
+    if ($env:TEST_FAIL_FAST) { Remove-TestDir; exit 1 }
+}
 
 $onWindows = $env:OS -eq 'Windows_NT'   # $IsWindows does not exist in 5.1
 $pwshExe = (Get-Process -Id $PID).Path  # the PowerShell running the tests
