@@ -70,6 +70,11 @@ jobs:
           PWSH: pwsh
         run: bash test/run-tests.sh
 
+      # One planted bug at a time in setup-user.sh and in enable_systemd of
+      # setup-dev-tools.sh; every one must make the shell tests above fail.
+      - name: Mutation run - shell scripts
+        run: python3 test/mutation/mutate.py user devtools
+
   windows:
     name: Windows - real cmd.exe + Windows PowerShell 5.1 end-to-end
     runs-on: windows-2022
