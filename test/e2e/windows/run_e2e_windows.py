@@ -228,8 +228,8 @@ def main():
     PW = 'P@ss!w^rd %x% "q"'
     MENU, USER, KEY = "Choose an option: ", "New Linux username: ", "Press any key"
     PWD1, PWD2 = "New Linux password", "Confirm password"
-    DEV, AGAIN = "[y/n]: ", "(y/n): "
-    finish = [["Registration complete.", None], [KEY, ""], [DEV, "n"], [AGAIN, "n"], ["Done.", None], [KEY, ""]]
+    DEV = "[y/n]: "
+    finish = [["Registration complete.", None], [KEY, ""], [DEV, "n"], [MENU, "0"], ["Done.", None], [KEY, ""]]
     shown = []
     try:
         print("=== WIN E2E 1: live list (UTF-16), bad input, menu 6 -> Ubuntu-24.04 ===", flush=True)
@@ -238,7 +238,7 @@ def main():
             [USER, "Dev"], [USER, "dev"],
             [PWD1, "abc"], [PWD2, "abd"], [PWD1, PW], [PWD2, PW],
             ["Registration complete.", None], [KEY, ""], [DEV, "y"],
-            ["Dev-tools setup finished.", None], [KEY, ""], [AGAIN, "n"], ["Done.", None], [KEY, ""]],
+            ["Dev-tools setup finished.", None], [KEY, ""], [MENU, "0"], ["Done.", None], [KEY, ""]],
             work, bindir, bash)
         before = failed
         # Real cmd.exe can print the menu (Wine cannot) - check it exactly.
@@ -280,8 +280,18 @@ def main():
 
         print("=== WIN E2E 2: re-run, Debian already registered (real registry lookup) ===", flush=True)
         st, out = run_scenario("rerun", {"installed": ["Debian"], "online": "utf16"}, [
-            [MENU, "1"], [MENU, "2"], [USER, "dev"], [PWD1, PW], [PWD2, PW]] + finish, work, bindir, bash)
+            [MENU, "1"], [MENU, "2"], [USER, "dev"], [PWD1, PW], [PWD2, PW],
+            ["Registration complete.", None], [KEY, ""], [DEV, "n"],
+            # Post-install menu: bad input, then 1 = Start WSL now, back to the menu, 0 = Exit.
+            [MENU, "y"], [MENU, "1"], ["fake shell as dev", None], [MENU, "0"], ["Done.", None], [KEY, ""]],
+            work, bindir, bash)
         before = failed
+        for line in ("Setup finished. What next?", "1.  Start WSL now", "2.  Install another distro"):
+            check(line in out, f"post-install menu lacks {line!r}")
+        check('"y" is not a valid option.' in out, "bad post-install choice not rejected")
+        check([c["argv"] for c in calls(st)][-2:] == [["--", "true"], []],
+              f"Start WSL now did not open the shell last: {[c['argv'] for c in calls(st)][-2:]}")
+        check(out.count("Setup finished. What next?") == 3, "post-install menu did not come back after the shell")
         check("Debian GNU/Linux is already installed - skipping install," in out, "not detected as installed")
         check(installs(st) == [], f"re-run installed {installs(st)}")
         check(read(os.path.join(st, "root-Debian", "chpasswd.log")).strip("\n") == "dev:" + PW, "re-run chpasswd")
@@ -303,7 +313,7 @@ def main():
         print("=== WIN E2E 4: install another; list fetched once ===", flush=True)
         st, out = run_scenario("another", {"installed": [], "online": "utf8"}, [
             [MENU, "1"], [MENU, "4"], [USER, "dev"], [PWD1, PW], [PWD2, PW],
-            ["Registration complete.", None], [KEY, ""], [DEV, "n"], [AGAIN, "y"],
+            ["Registration complete.", None], [KEY, ""], [DEV, "n"], [MENU, "2"],
             [MENU, "2"], [USER, "ops"], [PWD1, PW], [PWD2, PW]] + finish, work, bindir, bash)
         before = failed
         check(installs(st) == ["Ubuntu", "Debian"], f"installed {installs(st)}")

@@ -542,14 +542,38 @@ echo.
 pause
 
 :ASKAGAIN
+REM  What next: the distro just set up can be opened right here, without
+REM  leaving the tool and hunting for start.bat. No cls - the results above
+REM  stay readable. Compared with delayed expansion only, like the main menu.
+echo.
+echo %CLR_CYAN%=========================================================%CLR_RESET%
+echo   Setup finished. What next?
+echo %CLR_CYAN%=========================================================%CLR_RESET%
+echo.
+echo   1.  Start WSL now
+echo   2.  Install another distro
+echo   0.  Exit
 echo.
 set "again="
-set /p again="Install another distribution? (y/n): "
-if /i "!again!"=="y" (
+set /p again="Choose an option: "
+if "!again!"=="0" goto END
+if "!again!"=="1" goto STARTAFTER
+if "!again!"=="2" (
     call :WSLSTATUS
     goto DISTROMENU
 )
-goto END
+echo.
+echo %CLR_RED%[ERROR]%CLR_RESET% "!again!" is not a valid option.
+goto ASKAGAIN
+
+REM --- "Start WSL now": start.bat opens the default distro - the one just
+REM     set up - in this window; typing exit there comes back to this menu.
+REM     If WSL cannot start, start.bat says why and waits for a key itself.
+:STARTAFTER
+echo.
+call "%~dp0start.bat"
+title WSL Setup
+goto ASKAGAIN
 
 :END
 echo.

@@ -129,7 +129,7 @@ PW='P@ss!w^rd %x% "q"'
 # JSON-quote the password once for the step lists.
 PWJ=$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]+"\n"+sys.argv[1]))' "$PW")
 MENU='"Choose an option: "'; USER='"New Linux username: "'; KEY='"Press any key"'
-DEV='"[y/n]: "'; AGAIN='"(y/n): "'
+DEV='"[y/n]: "'
 
 # NOTE: Wine's cmd.exe cannot print the menu entries themselves (it fails the
 # standard `for /l ... (1,1,!N!)` and `!NAME_%%i!` idioms that real cmd.exe
@@ -144,7 +144,7 @@ run_scenario happy '{"installed":[],"online":"utf16"}' "[
   [$USER, \"Dev\"], [$USER, \"dev\"],
   [\"@PASSWORD\", \"abc\nabd\"], [\"@PASSWORD\", $PWJ],
   [\"Registration complete.\", null], [$KEY, \"\"], [$DEV, \"y\"],
-  [\"Dev-tools setup finished.\", null], [$KEY, \"\"], [$AGAIN, \"n\"], [\"Done.\", null], [$KEY, \"\"]]"
+  [\"Dev-tools setup finished.\", null], [$KEY, \"\"], [$MENU, \"0\"], [\"Done.\", null], [$KEY, \"\"]]"
 has '"99" is not a valid option.'
 has '"1&echo INJECTED" is not a valid option.'
 hasnt 'INJECTED'
@@ -181,7 +181,9 @@ end_scenario
 echo "=== E2E 2: re-run on an already-installed distro (menu 2 -> Debian) ==="
 run_scenario rerun '{"installed":["Debian"],"online":"utf16"}' "[
   [$MENU, \"1\"], [$MENU, \"2\"], [$USER, \"dev\"], [\"@PASSWORD\", $PWJ],
-  [\"Registration complete.\", null], [$KEY, \"\"], [$DEV, \"n\"], [$AGAIN, \"n\"], [\"Done.\", null], [$KEY, \"\"]]"
+  [\"Registration complete.\", null], [$KEY, \"\"], [$DEV, \"n\"], [$MENU, \"y\"], [$MENU, \"0\"], [\"Done.\", null], [$KEY, \"\"]]"
+has 'Setup finished. What next?'
+has '"y" is not a valid option.'
 has 'Debian GNU/Linux is already installed - skipping install,'
 [ -z "$(calls installs)" ] && ok || bad "re-run tried to install [$(calls installs)]"
 [ "$(cat "$ST/root-Debian/chpasswd.log" 2>/dev/null)" = "dev:$PW" ] && ok || bad "re-run chpasswd [$(cat "$ST/root-Debian/chpasswd.log" 2>/dev/null)]"
@@ -193,7 +195,7 @@ echo "=== E2E 3: online list unavailable -> fallback menu, 1 -> Ubuntu ==="
 run_scenario offline '{"installed":[],"online":"fail","no_store_wsl":true}' "[
   [$MENU, \"1\"], [\"Could not read the live distro list\", null], [$KEY, \"\"],
   [$MENU, \"1\"], [$USER, \"dev\"], [\"@PASSWORD\", $PWJ],
-  [\"Registration complete.\", null], [$KEY, \"\"], [$DEV, \"n\"], [$AGAIN, \"n\"], [\"Done.\", null], [$KEY, \"\"]]"
+  [\"Registration complete.\", null], [$KEY, \"\"], [$DEV, \"n\"], [$MENU, \"0\"], [\"Done.\", null], [$KEY, \"\"]]"
 has 'WININET_E_NAME_NOT_RESOLVED'
 # No Store WSL answering --version, and Linux pwsh cannot ask Windows about
 # the WSL feature -> an honest "could not check", not a wrong claim.
@@ -207,9 +209,9 @@ end_scenario
 echo "=== E2E 4: install another - second distro, list fetched only once ==="
 run_scenario another '{"installed":[],"online":"utf8"}' "[
   [$MENU, \"1\"], [$MENU, \"4\"], [$USER, \"dev\"], [\"@PASSWORD\", $PWJ],
-  [\"Registration complete.\", null], [$KEY, \"\"], [$DEV, \"n\"], [$AGAIN, \"y\"],
+  [\"Registration complete.\", null], [$KEY, \"\"], [$DEV, \"n\"], [$MENU, \"2\"],
   [$MENU, \"2\"], [$USER, \"ops\"], [\"@PASSWORD\", $PWJ],
-  [\"Registration complete.\", null], [$KEY, \"\"], [$DEV, \"n\"], [$AGAIN, \"n\"], [\"Done.\", null], [$KEY, \"\"]]"
+  [\"Registration complete.\", null], [$KEY, \"\"], [$DEV, \"n\"], [$MENU, \"0\"], [\"Done.\", null], [$KEY, \"\"]]"
 [ "$(calls installs)" = "Ubuntu Debian" ] && ok || bad "installed [$(calls installs)], want 'Ubuntu Debian'"
 n=$(grep -c '"--list", "--online"' "$ST/calls.jsonl" || true)
 [ "$n" = "1" ] && ok || bad "online list fetched $n times, want 1"
