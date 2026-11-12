@@ -58,13 +58,14 @@ It runs the real `setup-user.sh` (with `useradd`/`chpasswd`/`usermod` stubbed an
 E2E=1 WINE=wine MINGW_CC=x86_64-w64-mingw32-gcc PWSH=pwsh bash test/run-tests.sh
 ```
 
-`test/e2e/run-e2e.sh` runs the **real `wsl-setup.bat` under Wine's `cmd.exe`**. `test/e2e/driver.py` types answers one prompt at a time, like a person would. Five scenarios are covered:
+`test/e2e/run-e2e.sh` runs the **real `wsl-setup.bat` under Wine's `cmd.exe`**. `test/e2e/driver.py` types answers one prompt at a time, like a person would. These scenarios are covered:
 
 - **Live list:** UTF-16 live list → invalid number → injection attempt → menu number → bad username → password mismatch → install → account setup → verification.
 - **Re-run:** a re-run on an already-installed distro.
 - **Offline:** offline fallback menu.
 - **Install another:** a second distro in the same run.
 - **Copy failure:** the script can't be copied into the distro → clean stop, no account touched, credentials never forwarded.
+- **Distro never answers:** the install works but the distro can't start → *restart pending* when Windows says so, otherwise *did not become ready*; either way nothing runs in it and the menu's WSL status is re-read.
 
 It checks that each menu number installs the right distro, `chpasswd` receives the exact password, `wsl.conf` and sudoers are written, and the credentials are forwarded into *only* the one `wsl.exe` call that needs them.
 
@@ -75,7 +76,7 @@ What's faked: `wsl.exe` (`test/e2e/fake_windows.py`), the registry lookup, the W
 Every pull request runs `.github/workflows/test.yml`:
 
 - **Linux:** shellcheck, plus the whole suite above including the Wine end-to-end test.
-- **Windows (real `cmd.exe` + Windows PowerShell 5.1):** every `.ps1` is parsed with 5.1. Then `test/e2e/windows/run_e2e_windows.py` runs the real `wsl-setup.bat` in a real console (ConPTY via `pywinpty`) through the same five scenarios, and more that need real `cmd.exe`: the menu shown after setup (bad input, **Start WSL now**, back to the menu), `wsl.exe` itself failing with exit code -1 at the install and at each script-copy step, `start.bat` on its own (no distro, a distro that can't start, a working one, a named one, a bad name), and **Start WSL** from the main menu. It types into the real masked `Read-Host` prompts, and the real registry lookup, `fltmc` and build check all run. Only `wsl.exe` is faked, by `WslShim.cs` → `fake_windows.py`. This job also checks the menu text itself, which Wine can't print.
+- **Windows (real `cmd.exe` + Windows PowerShell 5.1):** every `.ps1` is parsed with 5.1. Then `test/e2e/windows/run_e2e_windows.py` runs the real `wsl-setup.bat` in a real console (ConPTY via `pywinpty`) through the same scenarios, and more that need real `cmd.exe`: the menu shown after setup (bad input, **Start WSL now**, back to the menu), `wsl.exe` itself failing with exit code -1 at the install and at each script-copy step, `start.bat` on its own (no distro, a distro that can't start, a working one, a named one, a bad name), and **Start WSL** from the main menu. It types into the real masked `Read-Host` prompts, and the real registry lookup, `fltmc` and build check all run. Only `wsl.exe` is faked, by `WslShim.cs` → `fake_windows.py`. This job also checks the menu text itself, which Wine can't print.
 
 - **Windows, no fakes at all:** `Vampire/setup-wsl` makes sure WSL works on the hosted runner. Then `test/e2e/windows/run_real_wsl.py` drives the real `wsl-setup.bat` against Microsoft's `wsl.exe`, twice. Round 1 picks Debian from the live menu, so the `.bat` really runs `wsl --install -d Debian --web-download` and waits for the distro to boot. Round 2 re-runs on the now-installed distro and answers `y` to the dev-tools prompt, so `setup-dev-tools.sh` really installs nvm/Node, Docker and gh (all checked afterwards, plus the `docker` group and that `wsl.conf` keeps both `default=` and `systemd=true`). In round 1 it also picks **Start WSL now** after setup and checks that a real shell opens as the new user and that `exit` returns to the menu. After each round it checks inside the real distro that the account exists, its password hash matches exactly what was typed, `sudo -n` works, the user is the distro's and the machine's default, and nothing is left in `/tmp`.
 

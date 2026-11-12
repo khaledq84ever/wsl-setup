@@ -223,6 +223,11 @@ def fake_wsl(argv, env):
         # Bare `wsl`: the interactive shell start.bat opens.
         return out(f"fake shell as {user}\n")
     if cmd == ["true"]:
+        # "never_ready" in the state: the distro is registered but cannot
+        # start - wsl.exe's own error and exit code, every time.
+        with Locked() as s:
+            if s.get("never_ready"):
+                return err("Error code: Wsl/Service/CreateInstance/E_FAIL\r\n", -1)
         return out("")
     if cmd[:2] == ["wslpath", "-a"]:
         return out(win_to_unix(cmd[2]) + "\n")
