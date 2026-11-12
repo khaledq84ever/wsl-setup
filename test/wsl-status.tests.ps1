@@ -1,25 +1,16 @@
 # wsl-status.tests.ps1 - run the real wsl-status.ps1 against fake wsl.exe
-# scripts. Linux/pwsh only (fakes are /bin/sh scripts). The Windows feature
-# lookup is replaced by -FeatureState, since Linux has no such feature.
-$ErrorActionPreference = 'Stop'
-$script:pass = 0; $script:fail = 0
-function Ok  { $script:pass++ }
-function Bad { param($m) $script:fail++; Write-Host "  FAIL: $m" }
+# scripts (see helpers.ps1), on PowerShell 7 and Windows PowerShell 5.1. The
+# Windows feature lookup is replaced by -FeatureState: Linux has no such
+# feature, and on Windows the answer would depend on the machine.
+. (Join-Path $PSScriptRoot 'helpers.ps1')
 
 $status = Join-Path (Join-Path $PSScriptRoot '..') 'wsl-status.ps1'
-$pwshExe = (Get-Process -Id $PID).Path
-$tmp = Join-Path ([IO.Path]::GetTempPath()) ("wslstatus-" + [guid]::NewGuid())
-New-Item -ItemType Directory $tmp | Out-Null
+$tmp = New-TestDir 'wslstatus'
 
-function New-Fake([string]$name, [string]$body) {
-    $f = Join-Path $tmp $name
-    Set-Content -Path $f -Value ("#!/bin/sh`n" + $body + "`n") -NoNewline
-    chmod +x $f
-    $f
-}
 function Test-Status([string]$label, [string[]]$a, [int]$wantCode, [string]$wantLine) {
-    $out = @(& $pwshExe -NoProfile -File $status @a 2>&1 | ForEach-Object { [string]$_ })
-    $code = $LASTEXITCODE
+    $r = Invoke-Script $status $a
+    $code = $r.Code
+    $out = @(($r.Out + "`n" + $r.Err) -split "`r?`n")
     $lines = @($out | Where-Object { $_.Trim() })
     if ($code -eq $wantCode) { Ok } else { Bad "${label}: exit $code, want $wantCode [$($out -join ' / ')]" }
     if ($lines.Count -eq 1 -and $lines[0] -ceq $wantLine) { Ok } else { Bad "${label}: printed [$($out -join ' / ')], want [$wantLine]" }
@@ -28,7 +19,7 @@ function Test-Status([string]$label, [string[]]$a, [int]$wantCode, [string]$want
 }
 
 Write-Host '=== WSL-STATUS ==='
-$v16 = Join-Path $tmp 'ver-utf16'
+$v16 = "$tmp/ver-utf16"
 [IO.File]::WriteAllBytes($v16, [Text.Encoding]::Unicode.GetBytes("WSL version: 2.6.1.0`r`nKernel version: 6.6.87.2-1`r`n"))
 $store16 = New-Fake 'wsl-store16' "[ `"`$1`" = --version ] && cat '$v16' && exit 0; exit 9"
 Test-Status 'store WSL, UTF-16' @('-WslExe', $store16, '-FeatureState', 'Unknown') 0 'OK|WSL is installed - version 2.6.1.0'
@@ -68,6 +59,6 @@ Test-Status 'feature on, no wsl.exe' @('-WslExe', (Join-Path $tmp 'missing-wsl')
 # The feature is being turned off (takes effect at the next restart).
 Test-Status 'feature being disabled' @('-WslExe', $inbox, '-FeatureState', 'DisablePending') 1 'INFO|WSL is not installed yet - it is set up together with the distro you pick. Windows may need a restart.'
 
-Remove-Item -Recurse -Force $tmp
+Remove-TestDir
 Write-Host "WSL-STATUS RESULTS: $script:pass passed, $script:fail failed"
 exit ([int]($script:fail -ne 0))

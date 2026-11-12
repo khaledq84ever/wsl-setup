@@ -1,35 +1,13 @@
 # install-wait.tests.ps1 - run the real install-distro.ps1 and wait-distro.ps1
-# against fake wsl.exe scripts. The fakes are /bin/sh scripts; on Windows
-# (Windows PowerShell 5.1 or pwsh) each gets a .cmd wrapper that runs it with
-# Git's sh.exe, so the same tests run where the shipped scripts really run.
-$ErrorActionPreference = 'Stop'
-$script:pass = 0; $script:fail = 0
-function Ok  { $script:pass++ }
-function Bad { param($m) $script:fail++; Write-Host "  FAIL: $m" }
+# against fake wsl.exe scripts (see helpers.ps1). Runs on PowerShell 7 and on
+# Windows PowerShell 5.1, which is what really runs the shipped scripts.
+. (Join-Path $PSScriptRoot 'helpers.ps1')
 
 $root = Join-Path $PSScriptRoot '..'
 $install = Join-Path $root 'install-distro.ps1'
 $wait = Join-Path $root 'wait-distro.ps1'
-$pwshExe = (Get-Process -Id $PID).Path
-$onWindows = $env:OS -eq 'Windows_NT'   # $IsWindows does not exist in 5.1
-# Forward slashes: these paths are also written into the sh fakes, where a
-# backslash would be an escape character.
-$tmp = (Join-Path ([IO.Path]::GetTempPath()) ("instwait-" + [guid]::NewGuid())) -replace '\\', '/'
-New-Item -ItemType Directory $tmp | Out-Null
-$sh = $null
-if ($onWindows) {
-    # Git's sh, by full path: a bare "bash"/"sh" could be WSL's launcher.
-    $sh = Join-Path $env:ProgramFiles 'Git\bin\sh.exe'
-    if (-not (Test-Path -LiteralPath $sh)) { $sh = (Get-Command sh.exe -ErrorAction Stop).Source }
-}
+$tmp = New-TestDir 'instwait'
 
-function New-Fake([string]$name, [string]$body) {
-    $f = "$tmp/$name"
-    Set-Content -Path $f -Value ("#!/bin/sh`n" + $body + "`n") -NoNewline
-    if (-not $onWindows) { chmod +x $f; return $f }
-    Set-Content -Path "$f.cmd" -Value ("@`"$sh`" `"%~dp0$name`" %*`r`n@exit /b %errorlevel%`r`n") -NoNewline
-    "$f.cmd"
-}
 function Run([string]$script, [string[]]$a) {
     # Bypass: the -1 fake below is a .ps1, which a default Windows policy blocks.
     $out = & $pwshExe -NoProfile -ExecutionPolicy Bypass -File $script @a 2>&1 | Out-String
@@ -109,6 +87,6 @@ $ready = New-Fake 'wsl-ready' 'exit 0'
 $r = Run $wait @('-Distro', 'Debian', '-WslExe', $ready, '-IntervalSec', '0.1', '-RebootKeys', $key)
 if ($r.Code -eq 0) { Ok } else { Bad "ready distro with a restart pending: exit $($r.Code), want 0" }
 
-Remove-Item -Recurse -Force $tmp
+Remove-TestDir
 Write-Host "INSTALL-WAIT RESULTS: $script:pass passed, $script:fail failed"
 exit ([int]($script:fail -ne 0))

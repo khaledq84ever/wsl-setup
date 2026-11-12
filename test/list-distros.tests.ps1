@@ -1,19 +1,12 @@
 # list-distros.tests.ps1 - run the real list-distros.ps1 against a fake wsl.exe
 # that prints prepared bytes, covering every encoding and layout wsl.exe has
-# been seen to produce, plus the failure modes. Linux/pwsh only (the fake is a
-# /bin/sh script).
-$ErrorActionPreference = 'Stop'
-$script:pass = 0; $script:fail = 0
-function Ok  { $script:pass++ }
-function Bad { param($m) $script:fail++; Write-Host "  FAIL: $m" }
+# been seen to produce, plus the failure modes. Runs on PowerShell 7 and on
+# Windows PowerShell 5.1 (see helpers.ps1).
+. (Join-Path $PSScriptRoot 'helpers.ps1')
 
-$lister = Join-Path $PSScriptRoot '..' 'list-distros.ps1'
-$pwshExe = (Get-Process -Id $PID).Path
-$tmp = Join-Path ([IO.Path]::GetTempPath()) ("listdistros-" + [guid]::NewGuid())
-New-Item -ItemType Directory $tmp | Out-Null
-$fake = Join-Path $tmp 'fake-wsl'
-Set-Content -Path $fake -Value "#!/bin/sh`ncat `"`$1`"`n" -NoNewline
-chmod +x $fake
+$lister = Join-Path (Join-Path $PSScriptRoot '..') 'list-distros.ps1'
+$tmp = New-TestDir 'listdistros'
+$fake = New-Fake 'fake-wsl' 'cat "$1"'
 
 $intro3 = @(
     'The following is a list of valid distributions that can be installed.',
@@ -48,13 +41,13 @@ function Write-Case([string]$name, [string[]]$lines, [string]$eol, [string]$enc)
         'utf8'     { [Text.Encoding]::UTF8.GetBytes($text) }
     }
     if ($null -eq $bytes) { $bytes = [byte[]]::new(0) }   # empty output case
-    $f = Join-Path $tmp $name
+    $f = "$tmp/$name"
     [IO.File]::WriteAllBytes($f, [byte[]]$bytes)
     $f
 }
 function Invoke-Lister([string[]]$extra) {
-    $out = & $pwshExe -NoProfile -File $lister @extra 2>$null
-    [pscustomobject]@{ Rows = @($out | Where-Object { $_ }); Code = $LASTEXITCODE }
+    $r = Invoke-Script $lister $extra
+    [pscustomobject]@{ Rows = @(($r.Out -split "`r?`n") | Where-Object { $_ }); Code = $r.Code; Err = $r.Err }
 }
 function Test-List([string]$label, [string]$file, [string[]]$expect, [int]$code) {
     $r = Invoke-Lister @('-WslExe', $fake, '-WslArgs', $file)
@@ -99,26 +92,22 @@ Test-List 'network error utf16' (Write-Case 'err16' $errText "`r`n" 'utf16') @()
 Test-List 'network error utf8' (Write-Case 'err8' $errText "`r`n" 'utf8') @() 1
 Test-List 'empty output' (Write-Case 'empty' @() '' 'utf8') @() 1
 # The error text must reach stderr so the user sees why.
-$ef = Join-Path $tmp 'stderr.txt'
-& $pwshExe -NoProfile -File $lister -WslExe $fake -WslArgs (Join-Path $tmp 'err16') 2> $ef 1> $null
-$stderr = Get-Content -Raw $ef
-if ($stderr -match 'WININET_E_NAME_NOT_RESOLVED') { Ok } else { Bad "error text not shown on stderr: [$stderr]" }
+$r = Invoke-Lister @('-WslExe', $fake, '-WslArgs', "$tmp/err16")
+if ($r.Err -match 'WININET_E_NAME_NOT_RESOLVED') { Ok } else { Bad "error text not shown on stderr: [$($r.Err)]" }
 # Same when wsl.exe wrote its error to its own stderr, not stdout.
-$fakeErr = Join-Path $tmp 'fake-wsl-stderr'
-Set-Content -Path $fakeErr -Value "#!/bin/sh`ncat `"`$1`" >&2`n" -NoNewline
-chmod +x $fakeErr
-& $pwshExe -NoProfile -File $lister -WslExe $fakeErr -WslArgs (Join-Path $tmp 'err8') 2> $ef 1> $null
-if ($LASTEXITCODE -eq 1) { Ok } else { Bad "error on stderr only: exit $LASTEXITCODE, want 1" }
-$stderr = Get-Content -Raw $ef
-if ($stderr -match 'WININET_E_NAME_NOT_RESOLVED') { Ok } else { Bad "wsl.exe's own stderr not shown: [$stderr]" }
+$fakeErr = New-Fake 'fake-wsl-stderr' 'cat "$1" >&2'
+$r = Invoke-Lister @('-WslExe', $fakeErr, '-WslArgs', "$tmp/err8")
+if ($r.Code -eq 1) { Ok } else { Bad "error on stderr only: exit $($r.Code), want 1" }
+if ($r.Err -match 'WININET_E_NAME_NOT_RESOLVED') { Ok } else { Bad "wsl.exe's own stderr not shown: [$($r.Err)]" }
 # wsl.exe missing -> exit 2; wsl.exe hanging -> killed, exit 2, promptly.
-$r = Invoke-Lister @('-WslExe', (Join-Path $tmp 'does-not-exist'))
+$r = Invoke-Lister @('-WslExe', "$tmp/does-not-exist")
 if ($r.Code -eq 2 -and $r.Rows.Count -eq 0) { Ok } else { Bad "missing exe: exit $($r.Code)" }
 $sw = [Diagnostics.Stopwatch]::StartNew()
-$r = Invoke-Lister @('-WslExe', '/bin/sleep', '-WslArgs', '30', '-TimeoutSec', '2')
+$hang = New-Fake 'wsl-hang' 'sleep 30'
+$r = Invoke-Lister @('-WslExe', $hang, '-TimeoutSec', '2')
 $sw.Stop()
 if ($r.Code -eq 2 -and $sw.Elapsed.TotalSeconds -lt 15) { Ok } else { Bad "hang: exit $($r.Code) after $([int]$sw.Elapsed.TotalSeconds)s" }
 
-Remove-Item -Recurse -Force $tmp
+Remove-TestDir
 Write-Host "LIST-DISTROS RESULTS: $script:pass passed, $script:fail failed"
 exit ([int]($script:fail -ne 0))
