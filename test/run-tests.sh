@@ -287,7 +287,7 @@ SUDO=""   # write directly - no sudo in the harness
 source "$REPO/setup-dev-tools.sh"
 dev_enable_systemd() { enable_systemd "$1" || true; }
 
-echo "=== DEV WAYS: enable-systemd across 7 states, ${ITER}x each ==="
+echo "=== DEV WAYS: enable-systemd across 8 states, ${ITER}x each ==="
 for i in $(seq 1 "$ITER"); do
     # a) no file
     f="$WORKROOT/d_a_$i"; dev_enable_systemd "$f"
@@ -310,6 +310,9 @@ for i in $(seq 1 "$ITER"); do
     # g) return code: 0 when it changed the file, 1 when already enabled
     f="$WORKROOT/d_g_$i"; rm -f "$f"
     if enable_systemd "$f" && ! enable_systemd "$f"; then ok; else bad "devG#$i: wrong return code"; fi
+    # h) hand-edited, indented [boot] -> still found, no second section
+    f="$WORKROOT/d_h_$i"; printf '  [boot]\n  command=echo hi\n' > "$f"; dev_enable_systemd "$f"
+    if grep -qx 'systemd=true' "$f" && [ "$(grep -c '\[boot\]' "$f")" = "1" ]; then ok; else bad "devH#$i: indented [boot] not found"; fi
 done
 
 # ---- the PowerShell embedded in wsl-setup.bat (needs pwsh; skipped if absent) ----

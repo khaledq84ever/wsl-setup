@@ -33,6 +33,10 @@ STEP_TIMEOUT = float(os.environ.get("E2E_STEP_TIMEOUT", "180"))
 # swallow all console text up to the BEL in a later bash prompt.
 ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[=>()][0-9A-Za-z]?")
 
+# The .bat runs from a folder named the way a second download of the repo zip
+# is: a space and brackets, which cmd treats specially outside quotes.
+APPDIR = "wsl-setup-main (1)"
+
 passed = failed = 0
 SCEN = ""
 
@@ -162,11 +166,11 @@ class Console:
         return None
 
 
-def run_scenario(name, state, steps, work, bindir, bash, bat="wsl-setup.bat", args=(), extra_env=None):
+def run_scenario(name, state, steps, work, bindir, bash, bat="wsl-setup.bat", args=(), extra_env=None, appdir=APPDIR):
     global SCEN
     SCEN = name
     st = os.path.join(work, name)
-    app = os.path.join(st, "app")
+    app = os.path.join(st, appdir)
     os.makedirs(os.path.join(st, "req"))
     os.makedirs(app)
     for f in os.listdir(REPO):
@@ -274,7 +278,7 @@ def main():
                   "* Ubuntu-24.04", "To open Ubuntu 24.04 LTS later as Administrator, run start.bat next to"):
             check(s in out, f"console lacks {s!r}")
         check(open(os.path.join(REPO, "start.bat"), "rb").read()
-              == open(os.path.join(st, "app", "start.bat"), "rb").read(), "start.bat was modified")
+              == open(os.path.join(st, APPDIR, "start.bat"), "rb").read(), "start.bat was modified")
         # Scripts run from /tmp must use random mktemp names and be removed.
         ran = [c["argv"][-1] for c in calls(st) if c["argv"][-2:-1] == ["bash"]]
         check(len(ran) == 2 and len(set(ran)) == 2
@@ -426,6 +430,13 @@ def main():
             n = sum(1 for c in calls(st) if c["argv"] == ["--version"])
             check(n == 2, f"WSL status checked {n} times, want 2 (start, and again after the failed wait)")
             if failed > before: shown.append(st)
+
+        print("=== WIN E2E 5-bang: folder path with an exclamation mark -> says so, nothing runs ===", flush=True)
+        st, out = run_scenario("bang", {"installed": [], "online": "utf16"}, [[KEY, ""]],
+                               work, bindir, bash, appdir="wsl setup!")
+        check("cannot run from a folder with an exclamation" in out, "no message about the exclamation mark")
+        check("files are missing" not in out and "Choose an option" not in out, "went on past the folder check")
+        check(calls(st) == [], f"wsl.exe was called: {calls(st)[:2]}")
 
         print("=== WIN E2E 6: start.bat, no distro for this account -> says why, waits ===", flush=True)
         st, out = run_scenario("start-nodistro", {"installed": [], "default": ""}, [[KEY, ""]],
