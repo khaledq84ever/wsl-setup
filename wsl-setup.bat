@@ -4,7 +4,8 @@ title WSL Setup
 
 REM =====================================================================
 REM  wsl-setup.bat
-REM  Simple 2-option WSL installer with fully automatic user creation
+REM  WSL installer: pick a distro from a live list, the Linux account is
+REM  created automatically; can also open the distro that is installed.
 REM =====================================================================
 
 REM WSL_UTF8=1 makes wsl.exe emit UTF-8 instead of UTF-16 when its output
@@ -84,6 +85,11 @@ if defined missing (
 )
 
 REM --- Is WSL itself installed? (separate from any distro) ---
+REM  A failed install attempt comes back here rather than to :MENU: it may
+REM  have changed WSL's own state (just turned on, restart pending), and the
+REM  line at the top of the menu should say so instead of what was true
+REM  when the tool started.
+:MENUFRESH
 call :WSLSTATUS
 
 REM --- Main menu: install a distro, or open the one already installed ---
@@ -313,7 +319,7 @@ if "!alreadyInstalled!"=="1" (
         echo         run this tool again.
         call :CLEARCREDS
         pause
-        goto MENU
+        goto MENUFRESH
     )
 )
 
@@ -335,7 +341,7 @@ if "!waitResult!"=="2" (
     echo         where it left off.
     call :CLEARCREDS
     pause
-    goto MENU
+    goto MENUFRESH
 )
 
 echo %CLR_RED%[ERROR]%CLR_RESET% !selectedFriendly! did not become ready after 5 minutes.
@@ -345,7 +351,7 @@ echo         enabling WSL. Restart your PC, then run this tool again
 echo         and pick the same option - it will pick up where it left off.
 call :CLEARCREDS
 pause
-goto MENU
+goto MENUFRESH
 
 :READY
 echo Creating user "!wslUser!" automatically ...

@@ -5,6 +5,11 @@ wait-distro.ps1 - wait until a freshly installed distro answers
 Exit codes: 0 = ready, 2 = Windows has a restart pending (WSL cannot finish
 until reboot), 1 = gave up after -TimeoutSec.
 
+Only the servicing key counts as "restart pending": enabling a Windows
+feature such as WSL sets it. PendingFileRenameOperations is deliberately not
+used - it is a registry value, not a key (so Test-Path on it was always
+false), and almost any installer sets it, which says nothing about WSL.
+
 -WslExe / -IntervalSec / -RebootKeys exist for the test harness;
 wsl-setup.bat uses the defaults.
 #>
@@ -14,8 +19,7 @@ param(
     [int]$TimeoutSec = 300,
     [double]$IntervalSec = 5,
     [string[]]$RebootKeys = @(
-        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending',
-        'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\PendingFileRenameOperations')
+        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending')
 )
 
 $started = Get-Date

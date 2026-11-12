@@ -175,6 +175,11 @@ def fake_wsl(argv, env):
         return out("  NAME                  STATE           VERSION\r\n" + rows)
     if argv and argv[0] == "--install":
         name = argv[argv.index("-d") + 1]
+        # "install_fail" in the state: the download fails, with wsl.exe's
+        # own exit code -1.
+        with Locked() as s:
+            if s.get("install_fail"):
+                return err("Error code: Wsl/InstallDistro/WININET_E_CANNOT_CONNECT\r\n", -1)
         with Locked() as s:
             if name not in s["installed"]:
                 s["installed"].append(name)
