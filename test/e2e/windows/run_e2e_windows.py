@@ -28,7 +28,10 @@ FAKE = os.path.join(E2E, "fake_windows.py")
 SYS_WSL = os.path.join(os.environ["SystemRoot"], "System32", "wsl.exe")
 LXSS = r"Software\Microsoft\Windows\CurrentVersion\Lxss"
 STEP_TIMEOUT = float(os.environ.get("E2E_STEP_TIMEOUT", "180"))
-ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07|\x1b[=>()][0-9A-Za-z]?")
+# An OSC (window title etc.) ends at BEL or at ST (ESC \\) and never spans
+# another ESC: matching "up to the next BEL" let one ST-terminated title
+# swallow all console text up to the BEL in a later bash prompt.
+ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[=>()][0-9A-Za-z]?")
 
 passed = failed = 0
 SCEN = ""
@@ -130,8 +133,8 @@ class Console:
 
     def drive(self, steps):
         pos = 0
-        for expect, answer in steps:
-            deadline = time.time() + STEP_TIMEOUT
+        for expect, answer, *limit in steps:   # optional 3rd item: this step's own timeout
+            deadline = time.time() + (limit[0] if limit else STEP_TIMEOUT)
             while True:
                 t = self.text()
                 i = t.find(expect, pos)
@@ -142,6 +145,7 @@ class Console:
                     time.sleep(0.5)
                     return f"script exited while waiting for {expect!r}"
                 if time.time() > deadline:
+                    self.p.terminate(force=True)   # never leave a console running behind a failed step
                     return f"timed out waiting for {expect!r}"
                 time.sleep(0.05)
             if answer is None:
@@ -228,8 +232,8 @@ def main():
     PW = 'P@ss!w^rd %x% "q"'
     MENU, USER, KEY = "Choose an option: ", "New Linux username: ", "Press any key"
     PWD1, PWD2 = "New Linux password", "Confirm password"
-    DEV, AGAIN = "[y/n]: ", "(y/n): "
-    finish = [["Registration complete.", None], [KEY, ""], [DEV, "n"], [AGAIN, "n"], ["Done.", None], [KEY, ""]]
+    DEV = "[y/n]: "
+    finish = [["Registration complete.", None], [KEY, ""], [DEV, "n"], [MENU, "0"], ["Done.", None], [KEY, ""]]
     shown = []
     try:
         print("=== WIN E2E 1: live list (UTF-16), bad input, menu 6 -> Ubuntu-24.04 ===", flush=True)
@@ -238,7 +242,7 @@ def main():
             [USER, "Dev"], [USER, "dev"],
             [PWD1, "abc"], [PWD2, "abd"], [PWD1, PW], [PWD2, PW],
             ["Registration complete.", None], [KEY, ""], [DEV, "y"],
-            ["Dev-tools setup finished.", None], [KEY, ""], [AGAIN, "n"], ["Done.", None], [KEY, ""]],
+            ["Dev-tools setup finished.", None], [KEY, ""], [MENU, "0"], ["Done.", None], [KEY, ""]],
             work, bindir, bash)
         before = failed
         # Real cmd.exe can print the menu (Wine cannot) - check it exactly.
@@ -280,8 +284,18 @@ def main():
 
         print("=== WIN E2E 2: re-run, Debian already registered (real registry lookup) ===", flush=True)
         st, out = run_scenario("rerun", {"installed": ["Debian"], "online": "utf16"}, [
-            [MENU, "1"], [MENU, "2"], [USER, "dev"], [PWD1, PW], [PWD2, PW]] + finish, work, bindir, bash)
+            [MENU, "1"], [MENU, "2"], [USER, "dev"], [PWD1, PW], [PWD2, PW],
+            ["Registration complete.", None], [KEY, ""], [DEV, "n"],
+            # Post-install menu: bad input, then 1 = Start WSL now, back to the menu, 0 = Exit.
+            [MENU, "y"], [MENU, "1"], ["fake shell as dev", None], [MENU, "0"], ["Done.", None], [KEY, ""]],
+            work, bindir, bash)
         before = failed
+        for line in ("Setup finished. What next?", "1.  Start WSL now", "2.  Install another distro"):
+            check(line in out, f"post-install menu lacks {line!r}")
+        check('"y" is not a valid option.' in out, "bad post-install choice not rejected")
+        check([c["argv"] for c in calls(st)][-2:] == [["--", "true"], []],
+              f"Start WSL now did not open the shell last: {[c['argv'] for c in calls(st)][-2:]}")
+        check(out.count("Setup finished. What next?") == 3, "post-install menu did not come back after the shell")
         check("Debian GNU/Linux is already installed - skipping install," in out, "not detected as installed")
         check(installs(st) == [], f"re-run installed {installs(st)}")
         check(read(os.path.join(st, "root-Debian", "chpasswd.log")).strip("\n") == "dev:" + PW, "re-run chpasswd")
@@ -303,7 +317,7 @@ def main():
         print("=== WIN E2E 4: install another; list fetched once ===", flush=True)
         st, out = run_scenario("another", {"installed": [], "online": "utf8"}, [
             [MENU, "1"], [MENU, "4"], [USER, "dev"], [PWD1, PW], [PWD2, PW],
-            ["Registration complete.", None], [KEY, ""], [DEV, "n"], [AGAIN, "y"],
+            ["Registration complete.", None], [KEY, ""], [DEV, "n"], [MENU, "2"],
             [MENU, "2"], [USER, "ops"], [PWD1, PW], [PWD2, PW]] + finish, work, bindir, bash)
         before = failed
         check(installs(st) == ["Ubuntu", "Debian"], f"installed {installs(st)}")

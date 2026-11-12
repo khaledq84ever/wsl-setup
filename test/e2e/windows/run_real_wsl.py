@@ -28,7 +28,7 @@ USER = "dev"
 PW = 'P@ss!w^rd %x% "q"'
 MENU, UPROMPT, KEY = "Choose an option: ", "New Linux username: ", "Press any key"
 PWD1, PWD2 = "New Linux password", "Confirm password"
-DEV, AGAIN = "[y/n]: ", "(y/n): "
+DEV = "[y/n]: "
 
 passed = failed = 0
 
@@ -95,12 +95,20 @@ def run_bat(distro, round_name, dev_tools=False):
     dev = ([[DEV, "y"], ["Dev-tools setup finished.", None], [KEY, ""]] if dev_tools else [[DEV, "n"]])
     err = con.drive([
         [MENU, "1"], [MENU, num], [UPROMPT, USER], [PWD1, PW], [PWD2, PW],
-        ["Registration complete.", None], [KEY, ""]] + dev + [[AGAIN, "n"], ["Done.", None], [KEY, ""]])
+        ["Registration complete.", None], [KEY, ""]] + dev + [
+        # Post-install menu, 1 = Start WSL now: a real shell as the new user;
+        # after `exit` the menu is back and 0 leaves.
+        [MENU, "1"], ["$ ", "echo MARK-$((6*7))-$(id -un)", 180], [f"MARK-42-{USER}", "exit", 60],
+        [MENU, "0", 60], ["Done.", None, 60], [KEY, "", 60]])
     out = con.text()
     log = os.path.join(tempfile.gettempdir(), f"real-wsl-{round_name}.txt")
     open(log, "w", encoding="utf-8").write(out)
     before = failed
     check(err is None, f"driver: {err}")
+    if err:
+        print(f"----- {round_name} console tail -----\n{out[-3000:]}\n-----", flush=True)
+    check(f"MARK-42-{USER}" in out, f"'Start WSL now' did not open a shell as {USER}")
+    check(out.count("Setup finished. What next?") == 2, "post-install menu did not come back after the shell")
     if was_installed:
         check("is already installed - skipping install," in out, "not detected as already installed")
     else:

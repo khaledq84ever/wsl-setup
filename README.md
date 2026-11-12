@@ -16,7 +16,8 @@ Fully automatic WSL setup for a Windows PC. Run one `.bat` file, pick any distro
 6. It sets that user as the distro's default user, sets the distro as the **machine's** default (`wsl --set-default`), and verifies that typing plain `wsl` in any terminal drops straight into that user with no prompts.
 7. It prints what WSL itself now reports — `wsl --status` and `wsl --list --verbose` (the `*` marks the default distro) — so you can see the install really happened.
 8. `start.bat` (shipped next to it) opens your default distro **as Administrator**: it requests UAC like `wsl-setup.bat`, then starts `wsl.exe` in its own folder. If WSL can't start, the window stays open and says why — no distro installed for this Windows account (a restart is still pending, or the distro was installed under another account), or WSL's own error with the usual fixes (restart, virtualization, `wsl --update`) plus `wsl --status` and `wsl -l -v`. Distros are per Windows account, so approve the UAC prompt with the same account you set WSL up with.
-9. The window never closes itself — every path, success or error, ends with a pause so you can read the output.
+9. When setup is done it asks what next: **1 Start WSL now** (opens the distro you just set up, via `start.bat`; type `exit` to come back), **2 Install another distro**, **0 Exit**.
+10. The window never closes itself — every path, success or error, ends with a pause so you can read the output.
 
 ## What it does differently from the built-in `wsl --install` wizard
 
