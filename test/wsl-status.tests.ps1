@@ -57,6 +57,17 @@ if ($sw.Elapsed.TotalSeconds -lt 15) { Ok } else { Bad "hang case took $([int]$s
 $noVer = New-Fake 'wsl-nover' 'echo "something unexpected"; exit 0'
 Test-Status 'exit 0 without a version' @('-WslExe', $noVer, '-FeatureState', 'Disabled') 1 'INFO|WSL is not installed yet - it is set up together with the distro you pick. Windows may need a restart.'
 
+# Fails but happens to print something version-like: a failed --version says
+# nothing about WSL being installed.
+$failVer = New-Fake 'wsl-failver' 'echo "WSL version: 9.9.9.9"; exit 1'
+Test-Status 'failed --version with a version in its output' @('-WslExe', $failVer, '-FeatureState', 'Disabled') 1 'INFO|WSL is not installed yet - it is set up together with the distro you pick. Windows may need a restart.'
+
+# The feature is on but there is no wsl.exe to run: not usable, so not "installed".
+Test-Status 'feature on, no wsl.exe' @('-WslExe', (Join-Path $tmp 'missing-wsl'), '-FeatureState', 'Enabled') 1 'INFO|WSL is not installed yet - it is set up together with the distro you pick. Windows may need a restart.'
+
+# The feature is being turned off (takes effect at the next restart).
+Test-Status 'feature being disabled' @('-WslExe', $inbox, '-FeatureState', 'DisablePending') 1 'INFO|WSL is not installed yet - it is set up together with the distro you pick. Windows may need a restart.'
+
 Remove-Item -Recurse -Force $tmp
 Write-Host "WSL-STATUS RESULTS: $script:pass passed, $script:fail failed"
 exit ([int]($script:fail -ne 0))

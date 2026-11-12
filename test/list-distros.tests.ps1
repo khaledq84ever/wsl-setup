@@ -84,6 +84,14 @@ Test-List 'no header' (Write-Case 'nohdr' $table[1..2] "`r`n" 'utf8') @('AlmaLin
 # cmd-hostile characters stripped from friendly names; duplicates removed.
 $dirty = @('NAME    FRIENDLY NAME', 'Weird-1    Bang! ^Caret| 100%', 'Weird-1    duplicate', 'Plain-2    Plain')
 Test-List 'sanitize+dedupe' (Write-Case 'dirty' $dirty "`r`n" 'utf16bom') @('Weird-1|Bang Caret 100', 'Plain-2|Plain') 0
+# Only the column header may be dropped for having no lowercase letter: a
+# distro whose name is all capitals, further down the list, is a distro.
+$caps = @('NAME    FRIENDLY NAME', 'RHEL-9    Red Hat Enterprise Linux 9', 'SLES    SUSE Linux Enterprise Server')
+Test-List 'all-caps names' (Write-Case 'caps' $caps "`r`n" 'utf16') @('RHEL-9|Red Hat Enterprise Linux 9', 'SLES|SUSE Linux Enterprise Server') 0
+# A friendly name made only of stripped characters would leave the .bat with
+# an empty menu line: fall back to the name.
+$blank = @('NAME    FRIENDLY NAME', 'Odd-1    !!! ^^^', 'Plain-2    Plain')
+Test-List 'friendly name stripped to nothing' (Write-Case 'blank' $blank "`r`n" 'utf8') @('Odd-1|Odd-1', 'Plain-2|Plain') 0
 # A genuine wsl.exe failure (no network) -> no rows, exit 1.
 $errText = @('Failed to fetch the list distribution from ''https://raw.githubusercontent.com/microsoft/WSL/master/distributions/DistributionInfo.json''.',
              'The server name or address could not be resolved', 'Error code: Wsl/WININET_E_NAME_NOT_RESOLVED')
@@ -95,6 +103,14 @@ $ef = Join-Path $tmp 'stderr.txt'
 & $pwshExe -NoProfile -File $lister -WslExe $fake -WslArgs (Join-Path $tmp 'err16') 2> $ef 1> $null
 $stderr = Get-Content -Raw $ef
 if ($stderr -match 'WININET_E_NAME_NOT_RESOLVED') { Ok } else { Bad "error text not shown on stderr: [$stderr]" }
+# Same when wsl.exe wrote its error to its own stderr, not stdout.
+$fakeErr = Join-Path $tmp 'fake-wsl-stderr'
+Set-Content -Path $fakeErr -Value "#!/bin/sh`ncat `"`$1`" >&2`n" -NoNewline
+chmod +x $fakeErr
+& $pwshExe -NoProfile -File $lister -WslExe $fakeErr -WslArgs (Join-Path $tmp 'err8') 2> $ef 1> $null
+if ($LASTEXITCODE -eq 1) { Ok } else { Bad "error on stderr only: exit $LASTEXITCODE, want 1" }
+$stderr = Get-Content -Raw $ef
+if ($stderr -match 'WININET_E_NAME_NOT_RESOLVED') { Ok } else { Bad "wsl.exe's own stderr not shown: [$stderr]" }
 # wsl.exe missing -> exit 2; wsl.exe hanging -> killed, exit 2, promptly.
 $r = Invoke-Lister @('-WslExe', (Join-Path $tmp 'does-not-exist'))
 if ($r.Code -eq 2 -and $r.Rows.Count -eq 0) { Ok } else { Bad "missing exe: exit $($r.Code)" }
