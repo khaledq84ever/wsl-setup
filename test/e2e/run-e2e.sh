@@ -69,7 +69,7 @@ run_scenario() {
     SCEN=$1
     if [ -n "${E2E_ONLY:-}" ] && [ "$SCEN" != "$E2E_ONLY" ]; then OUT=/dev/null; ST=/nonexistent; SKIPPED=1; return 0; fi
     SKIPPED=0
-    ST="$WORK/$SCEN"; APP="$ST/app (1) & co!"   # an awkward folder name: see README
+    ST="$WORK/$SCEN"; APP="$ST/app (1) & co"   # an awkward folder name; no "!": Wine's cmd expands it twice
     mkdir -p "$ST/req" "$ST/pwsh-cwd" "$APP"
     cp "$REPO"/*.bat "$REPO"/*.sh "$REPO"/*.ps1 "$APP/"
     printf '%s' "$2" > "$ST/state.json"
