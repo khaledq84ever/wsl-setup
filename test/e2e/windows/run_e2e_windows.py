@@ -375,6 +375,21 @@ def main():
             check(os.listdir(os.path.join(st, "root-Debian", "tmp")) == [], "temp script left behind")
             if failed > before: shown.append(st)
 
+        print("=== WIN E2E 5-install: wsl --install fails (-1) -> error shown, WSL status re-checked ===", flush=True)
+        st, out = run_scenario("installfail", {"installed": [], "online": "utf16", "install_fail": True}, [
+            [MENU, "1"], [MENU, "6"], [USER, "dev"], [PWD1, PW], [PWD2, PW],
+            ["wsl.exe --install failed", None], [KEY, ""], [MENU, "0"], ["Done.", None], [KEY, ""]],
+            work, bindir, bash)
+        before = failed
+        check("WININET_E_CANNOT_CONNECT" in out, "wsl.exe's own install error not shown")
+        check('wsl.exe --install failed for "Ubuntu-24.04"' in out, "install failure not reported")
+        check("Registration complete." not in out, "reported success after a failed install")
+        check(not any("PASS_B64" in c["forwarded"] or "USER_B64" in c["forwarded"] for c in calls(st)),
+              "credentials forwarded although nothing was installed")
+        n = sum(1 for c in calls(st) if c["argv"] == ["--version"])
+        check(n == 2, f"WSL status checked {n} times, want 2 (start, and again after the failed install)")
+        if failed > before: shown.append(st)
+
         print("=== WIN E2E 6: start.bat, no distro for this account -> says why, waits ===", flush=True)
         st, out = run_scenario("start-nodistro", {"installed": [], "default": ""}, [[KEY, ""]],
                                work, bindir, bash, bat="start.bat")
