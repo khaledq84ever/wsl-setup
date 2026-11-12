@@ -186,10 +186,15 @@ def run_scenario(name, state, steps, work, bindir, bash, bat="wsl-setup.bat", ar
     env.update({"E2E_STATE": st, "E2E_PYTHON": sys.executable, "E2E_FAKE": FAKE, "E2E_BASH": bash,
                 "PATH": bindir + os.pathsep + os.environ["PATH"]})
     env.update(extra_env or {})
-    # A list, not a string: pywinpty quotes each argument itself.
-    con = Console(["cmd.exe", "/c", os.path.join(app, bat), *args], app, env)
+    # A list, not a string: pywinpty quotes each argument itself. The .bat is
+    # named without its folder (the console starts in it): `cmd /c "<path>"`
+    # drops the quotes when the path has an & in it, which a double-click
+    # (cmd /c ""<path>" ") does not do. %~dp0 is still the full path.
+    con = Console(["cmd.exe", "/c", bat, *args], app, env)
     err = con.drive(steps)
     out = con.text()
+    if err:
+        print("  --- console output ---\n" + out[-3000:] + "\n  ---", flush=True)
     open(os.path.join(st, "out.txt"), "w", encoding="utf-8").write(out)
     if err:
         bad("driver: " + err)
