@@ -235,6 +235,15 @@ def fake_wsl(argv, env):
         fd = os.open(m(name), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         os.close(fd)
         return out(name + "\n")
+    # "wsl_fail": ["cp:wsl_setup_user", ...] in the state makes a matching
+    # command fail the way wsl.exe itself fails (not the Linux program): its
+    # own message and exit code -1, which `if errorlevel 1` does not catch.
+    with Locked() as s:
+        wsl_fail = list(s.get("wsl_fail", []))
+    for rule in wsl_fail:
+        name, _, needle = rule.partition(":")
+        if cmd[:1] == [name] and needle in " ".join(cmd[1:]):
+            return err("Catastrophic failure\r\nError code: Wsl/Service/E_UNEXPECTED\r\n", -1)
     if cmd[:1] == ["cp"]:
         if not os.path.exists(m(cmd[2])):
             # The .bat must only ever copy onto a file mktemp just made.
