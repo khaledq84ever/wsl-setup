@@ -130,8 +130,8 @@ class Console:
 
     def drive(self, steps):
         pos = 0
-        for expect, answer in steps:
-            deadline = time.time() + STEP_TIMEOUT
+        for expect, answer, *limit in steps:   # optional 3rd item: this step's own timeout
+            deadline = time.time() + (limit[0] if limit else STEP_TIMEOUT)
             while True:
                 t = self.text()
                 i = t.find(expect, pos)
@@ -142,6 +142,7 @@ class Console:
                     time.sleep(0.5)
                     return f"script exited while waiting for {expect!r}"
                 if time.time() > deadline:
+                    self.p.terminate(force=True)   # never leave a console running behind a failed step
                     return f"timed out waiting for {expect!r}"
                 time.sleep(0.05)
             if answer is None:

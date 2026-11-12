@@ -98,13 +98,15 @@ def run_bat(distro, round_name, dev_tools=False):
         ["Registration complete.", None], [KEY, ""]] + dev + [
         # Post-install menu, 1 = Start WSL now: a real shell as the new user;
         # after `exit` the menu is back and 0 leaves.
-        [MENU, "1"], ["$ ", "echo MARK-$((6*7))-$(id -un)"], [f"MARK-42-{USER}", "exit"],
-        [MENU, "0"], ["Done.", None], [KEY, ""]])
+        [MENU, "1"], ["$ ", "echo MARK-$((6*7))-$(id -un)", 180], [f"MARK-42-{USER}", "exit", 60],
+        [MENU, "0", 60], ["Done.", None, 60], [KEY, "", 60]])
     out = con.text()
     log = os.path.join(tempfile.gettempdir(), f"real-wsl-{round_name}.txt")
     open(log, "w", encoding="utf-8").write(out)
     before = failed
     check(err is None, f"driver: {err}")
+    if err:
+        print(f"----- {round_name} console tail -----\n{out[-3000:]}\n-----", flush=True)
     check(f"MARK-42-{USER}" in out, f"'Start WSL now' did not open a shell as {USER}")
     check(out.count("Setup finished. What next?") == 2, "post-install menu did not come back after the shell")
     if was_installed:
