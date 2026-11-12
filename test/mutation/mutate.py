@@ -50,7 +50,12 @@ INSTALL = [
  ("log files left behind after a run", "Remove-Item -LiteralPath $outLog, $errLog -ErrorAction SilentlyContinue\nexit $code", "exit $code"),
  ("log files left behind when wsl.exe cannot be started", "    Remove-Item -LiteralPath $outLog, $errLog -ErrorAction SilentlyContinue\n    exit 1", "    exit 1"),
  ("PS51: .Handle not touched (exit code lost)", "$null = $proc.Handle\n", ""),
- ("PS51: empty log returned as $null", "    if ($null -eq $text) { return '' }\n", ""),
+ # Three guards cover the same 5.1 quirk (Get-Content -Raw of an empty file
+ # is $null); removing any one alone changes nothing, so all three go.
+ ("PS51: empty log handled as $null (all three guards removed)", [
+     ("    if ($null -eq $text) { return '' }\n", ""),
+     ("return ([string]$text) -replace", "return $text -replace"),
+     ("[regex]::Matches([string](Read-WslLog $outLog),", "[regex]::Matches((Read-WslLog $outLog),")], None),
 ]
 
 LIST = [
@@ -125,11 +130,16 @@ def mutate(key):
     ran = survived = 0
     try:
         for name, old, new in mutants:
-            assert norm.count(old) == 1, f"{target}: mutant {name!r} matches {norm.count(old)} places - mutate.py is out of date"
+            edits = old if isinstance(old, list) else [(old, new)]   # a mutant may need several edits
+            for o, _ in edits:
+                assert norm.count(o) == 1, f"{target}: mutant {name!r} matches {norm.count(o)} places - mutate.py is out of date"
             if name.startswith("PS51:") and not PS51:
                 print(f"skipped   {name}", flush=True)
                 continue
-            open(path, "w", newline="\n").write(norm.replace(old, new))
+            text = norm
+            for o, n in edits:
+                text = text.replace(o, n)
+            open(path, "w", newline="\n").write(text)
             killed, detail = run_tests(test)
             ran += 1
             survived += not killed
