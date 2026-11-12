@@ -108,6 +108,6 @@ $r = Invoke-Lister @('-WslExe', $hang, '-TimeoutSec', '2')
 $sw.Stop()
 if ($r.Code -eq 2 -and $sw.Elapsed.TotalSeconds -lt 15) { Ok } else { Bad "hang: exit $($r.Code) after $([int]$sw.Elapsed.TotalSeconds)s" }
 
-Remove-Item -Recurse -Force $tmp
+Remove-TestDir
 Write-Host "LIST-DISTROS RESULTS: $script:pass passed, $script:fail failed"
 exit ([int]($script:fail -ne 0))

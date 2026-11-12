@@ -87,6 +87,6 @@ $ready = New-Fake 'wsl-ready' 'exit 0'
 $r = Run $wait @('-Distro', 'Debian', '-WslExe', $ready, '-IntervalSec', '0.1', '-RebootKeys', $key)
 if ($r.Code -eq 0) { Ok } else { Bad "ready distro with a restart pending: exit $($r.Code), want 0" }
 
-Remove-Item -Recurse -Force $tmp
+Remove-TestDir
 Write-Host "INSTALL-WAIT RESULTS: $script:pass passed, $script:fail failed"
 exit ([int]($script:fail -ne 0))

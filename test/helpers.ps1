@@ -40,11 +40,22 @@ function New-Fake([string]$name, [string]$body) {
 # stderr lines into error records, which stop the caller or reformat the text.
 # Bypass: a default Windows policy would refuse to run a .ps1 fake.
 # Start-Process joins the arguments with spaces, so none may contain one.
+# Not -Wait: on Windows that also waits for every descendant, and a fake that
+# "hangs" leaves its sh child sleeping after the helper has killed the .cmd
+# wrapper - the test would then measure the fake, not the helper. That child
+# also keeps the output files open, hence one pair of files per call and a
+# cleanup (Remove-TestDir) that does not insist.
+$script:invokeCount = 0
 function Invoke-Script([string]$script, [string[]]$a) {
-    $o = "$tmp/stdout.txt"; $e = "$tmp/stderr.txt"
-    $p = Start-Process -FilePath $pwshExe -NoNewWindow -Wait -PassThru `
+    $script:invokeCount++
+    $o = "$tmp/stdout-$script:invokeCount.txt"; $e = "$tmp/stderr-$script:invokeCount.txt"
+    $p = Start-Process -FilePath $pwshExe -NoNewWindow -PassThru `
         -ArgumentList (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $script) + $a) `
         -RedirectStandardOutput $o -RedirectStandardError $e
+    $null = $p.Handle   # 5.1: without this, ExitCode is $null after the exit
+    $p.WaitForExit()
     $read = { param($f) $t = Get-Content -Raw -LiteralPath $f -ErrorAction SilentlyContinue; if ($null -eq $t) { '' } else { [string]$t } }
     [pscustomobject]@{ Code = $p.ExitCode; Out = (& $read $o); Err = (& $read $e) }
 }
+
+function Remove-TestDir { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }

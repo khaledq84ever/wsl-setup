@@ -59,6 +59,6 @@ Test-Status 'feature on, no wsl.exe' @('-WslExe', (Join-Path $tmp 'missing-wsl')
 # The feature is being turned off (takes effect at the next restart).
 Test-Status 'feature being disabled' @('-WslExe', $inbox, '-FeatureState', 'DisablePending') 1 'INFO|WSL is not installed yet - it is set up together with the distro you pick. Windows may need a restart.'
 
-Remove-Item -Recurse -Force $tmp
+Remove-TestDir
 Write-Host "WSL-STATUS RESULTS: $script:pass passed, $script:fail failed"
 exit ([int]($script:fail -ne 0))
