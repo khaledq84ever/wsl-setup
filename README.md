@@ -78,7 +78,7 @@ What's faked: `wsl.exe` (`test/e2e/fake_windows.py`), the registry lookup, the W
 Every pull request runs `.github/workflows/test.yml`:
 
 - **Linux:** shellcheck, plus the whole suite above including the Wine end-to-end test, then the mutation run for the two shell scripts.
-- **Windows (real `cmd.exe` + Windows PowerShell 5.1):** every `.ps1` is parsed with 5.1. Then `test/e2e/windows/run_e2e_windows.py` runs the real `wsl-setup.bat` in a real console (ConPTY via `pywinpty`) through the same scenarios, and more that need real `cmd.exe`: the menu shown after setup (bad input, **Start WSL now**, back to the menu), `wsl.exe` itself failing with exit code -1 at the install and at each script-copy step, `start.bat` on its own (no distro, a distro that can't start, a working one, a named one, a bad name), and **Start WSL** from the main menu. Every scenario runs from a folder named `wsl-setup-main (1) & co` (spaces, brackets and an ampersand), and one from a folder with `!` in its name, which must stop with a clear message. It types into the real masked `Read-Host` prompts, and the real registry lookup, `fltmc` and build check all run. Only `wsl.exe` is faked, by `WslShim.cs` → `fake_windows.py`. This job also checks the menu text itself, which Wine can't print.
+- **Windows (real `cmd.exe` + Windows PowerShell 5.1):** every `.ps1` is parsed with 5.1. Then `test/e2e/windows/run_e2e_windows.py` runs the real `wsl-setup.bat` in a real console (ConPTY via `pywinpty`) through the same scenarios, and more that need real `cmd.exe`: the menu shown after setup (bad input, **Start WSL now**, back to the menu), `wsl.exe` itself failing with exit code -1 at the install and at each script-copy step, `start.bat` on its own (no distro, a distro that can't start, a working one, a named one, a bad name), and **Start WSL** from the main menu. Every scenario runs from a folder named `wsl-setup-main (1) & co!` (spaces, brackets, an ampersand and an exclamation mark). It types into the real masked `Read-Host` prompts, and the real registry lookup, `fltmc` and build check all run. Only `wsl.exe` is faked, by `WslShim.cs` → `fake_windows.py`. This job also checks the menu text itself, which Wine can't print.
 
 - **Windows PowerShell 5.1, unit tests + mutation runs:** the unit tests of all four PowerShell helpers run again on 5.1 (their fake `wsl.exe` scripts go through Git's `sh.exe` there), followed by the mutation run for each helper.
 
@@ -89,5 +89,5 @@ What is still not covered: a first-ever WSL install on a PC where WSL isn't enab
 ## Notes
 
 - The created Linux user has **passwordless sudo** — convenient for a personal dev machine, but means any process running as that user can act as root without a password. Don't use this on a shared or security-sensitive machine.
-- `wsl-setup.bat` cannot run from a folder with `!` in its path (a limit of batch files); it says so and stops. Spaces, brackets and `&` in the path are fine.
+- The folder the files sit in may have spaces, brackets, `&` and `!` in its path.
 - Re-running the script against a distro that's already installed is safe — user creation is idempotent (`id -u ... || useradd ...`).

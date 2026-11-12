@@ -1,5 +1,7 @@
 @echo off
-setlocal
+REM  Delayed expansion is switched off explicitly: wsl-setup.bat calls this
+REM  file with it on, and then cmd would drop every "!" from %~dp0 and %~f0.
+setlocal DisableDelayedExpansion
 REM start.bat - open your default WSL distro in an Administrator window, after
 REM wsl-setup.bat has run. Double-click it, or run it from cmd. If WSL cannot
 REM start, the window stays open and says why, instead of flashing shut.
