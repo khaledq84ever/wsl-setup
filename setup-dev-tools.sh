@@ -25,10 +25,11 @@ enable_systemd() {
         # An explicit systemd=false (or anything else): flip it in place rather
         # than adding a second, conflicting systemd= line.
         $SUDO sed -i -E 's/^[[:space:]]*systemd[[:space:]]*=.*/systemd=true/' "$conf"
-    elif [ -f "$conf" ] && grep -q '^\[boot\]' "$conf"; then
+    elif [ -f "$conf" ] && grep -Eq '^[[:space:]]*\[boot\]' "$conf"; then
         # [boot] section already exists - add systemd under it instead of
-        # appending a duplicate [boot] section.
-        $SUDO sed -i '/^\[boot\]/a systemd=true' "$conf"
+        # appending a duplicate [boot] section. Indented counts too, as it
+        # does for WSL itself.
+        $SUDO sed -i -E '/^[[:space:]]*\[boot\]/a systemd=true' "$conf"
     else
         # If the file does not end in a newline, appending "[boot]" would glue
         # it onto the last line (e.g. "default=dev[boot]") and break both keys.

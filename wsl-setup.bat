@@ -28,6 +28,20 @@ set "CLR_YELLOW=%ESC%[93m"
 set "CLR_RED=%ESC%[91m"
 set "CLR_BOLD=%ESC%[1m"
 
+REM --- A "!" in the folder path cannot work in this script: with delayed
+REM     expansion on, cmd drops it from %~dp0 and %~f0, so the elevation below
+REM     and every helper file would be looked for in a folder that does not
+REM     exist - and reported as "rights not granted" or "files are missing".
+REM     Say what is really wrong instead. Checked before elevating, so the
+REM     message is not preceded by a pointless UAC prompt.
+if not exist "%~dp0" (
+    echo %CLR_RED%[ERROR]%CLR_RESET% This tool cannot run from a folder with an exclamation
+    echo         mark in its path. Rename or move the folder, then run it again.
+    echo.
+    pause
+    exit /b 1
+)
+
 REM --- Self-elevate to Administrator ---
 REM  fltmc only succeeds elevated and, unlike `net session`, does not depend on
 REM  the Server service - with that service stopped, `net session` always

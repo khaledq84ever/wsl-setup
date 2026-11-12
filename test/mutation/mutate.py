@@ -133,7 +133,7 @@ DEVTOOLS = [
  ("any systemd= line counts as enabled", "systemd[[:space:]]*=[[:space:]]*true[[:space:]]*$' \"$conf\"; then", "systemd[[:space:]]*=' \"$conf\"; then"),
  ("systemd=false not flipped", "s/^[[:space:]]*systemd[[:space:]]*=.*/systemd=true/'", "s/^[[:space:]]*systemd[[:space:]]*=.*/systemd=false/'"),
  ("existing systemd= line ignored (second one added)", "if [ -f \"$conf\" ] && grep -Eq '^[[:space:]]*systemd[[:space:]]*=' \"$conf\"; then", "if false; then"),
- ("existing [boot] ignored (second one added)", "elif [ -f \"$conf\" ] && grep -q '^\\[boot\\]' \"$conf\"; then", "elif false; then"),
+ ("existing [boot] ignored (second one added)", "elif [ -f \"$conf\" ] && grep -Eq '^[[:space:]]*\\[boot\\]' \"$conf\"; then", "elif false; then"),
  ("[boot] glued onto an unterminated last line", "nl=$'\\n'", "nl=''"),
  ("wsl.conf overwritten instead of appended", "| $SUDO tee -a \"$conf\" >/dev/null", "| $SUDO tee \"$conf\" >/dev/null"),
 ]
