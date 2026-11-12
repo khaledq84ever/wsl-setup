@@ -34,9 +34,9 @@ STEP_TIMEOUT = float(os.environ.get("E2E_STEP_TIMEOUT", "180"))
 ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[=>()][0-9A-Za-z]?")
 
 # The .bat runs from a folder named the way a second download of the repo zip
-# is, plus an ampersand: spaces, brackets and & are all special to cmd outside
-# quotes.
-APPDIR = "wsl-setup-main (1) & co"
+# is, plus an ampersand and an exclamation mark: spaces, brackets and & are
+# special to cmd outside quotes, and ! is dropped by delayed expansion.
+APPDIR = "wsl-setup-main (1) & co!"
 
 passed = failed = 0
 SCEN = ""
@@ -436,13 +436,6 @@ def main():
             n = sum(1 for c in calls(st) if c["argv"] == ["--version"])
             check(n == 2, f"WSL status checked {n} times, want 2 (start, and again after the failed wait)")
             if failed > before: shown.append(st)
-
-        print("=== WIN E2E 5-bang: folder path with an exclamation mark -> says so, nothing runs ===", flush=True)
-        st, out = run_scenario("bang", {"installed": [], "online": "utf16"}, [[KEY, ""]],
-                               work, bindir, bash, appdir="wsl setup!")
-        check("cannot run from a folder with an exclamation" in out, "no message about the exclamation mark")
-        check("files are missing" not in out and "Choose an option" not in out, "went on past the folder check")
-        check(calls(st) == [], f"wsl.exe was called: {calls(st)[:2]}")
 
         print("=== WIN E2E 6: start.bat, no distro for this account -> says why, waits ===", flush=True)
         st, out = run_scenario("start-nodistro", {"installed": [], "default": ""}, [[KEY, ""]],

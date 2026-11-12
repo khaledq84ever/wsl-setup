@@ -100,6 +100,17 @@ int wmain(int argc, wchar_t **argv) {
         e += wcslen(e) + 1;
     }
     FreeEnvironmentStringsW(env);
+    /* The folder cmd.exe is in, as one more "variable": the real wsl.exe
+     * starts the Linux command there, so the fake needs to know it. */
+    {
+        wchar_t cwd[MAX_PATH * 2], kv[MAX_PATH * 2 + 32];
+        if (GetCurrentDirectoryW(MAX_PATH * 2, cwd)) {
+            swprintf(kv, MAX_PATH * 2 + 32, L"E2E_PROXY_CWD=%ls", cwd);
+            int n; char *u = to_utf8(kv, &n);
+            if (eused + n > ecap) { ecap = (eused + n) * 2; eb = (char *)realloc(eb, ecap); }
+            memcpy(eb + eused, u, n); eused += n; free(u);
+        }
+    }
     put_file(tmpdir, L"env", eb, (DWORD)eused);
 
     if (needs_stdin) {

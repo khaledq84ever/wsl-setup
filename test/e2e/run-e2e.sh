@@ -69,7 +69,7 @@ run_scenario() {
     SCEN=$1
     if [ -n "${E2E_ONLY:-}" ] && [ "$SCEN" != "$E2E_ONLY" ]; then OUT=/dev/null; ST=/nonexistent; SKIPPED=1; return 0; fi
     SKIPPED=0
-    ST="$WORK/$SCEN"; APP="$ST/app"
+    ST="$WORK/$SCEN"; APP="$ST/app (1) & co"   # an awkward folder name; no "!": Wine drops it from every "!SELF_DIR!..." line
     mkdir -p "$ST/req" "$ST/pwsh-cwd" "$APP"
     cp "$REPO"/*.bat "$REPO"/*.sh "$REPO"/*.ps1 "$APP/"
     printf '%s' "$2" > "$ST/state.json"
@@ -77,9 +77,11 @@ run_scenario() {
     E2E_STATE="$ST" python3 "$HERE/fake_windows.py" serve "$ST/req" &
     DAEMON=$!
     OUT="$ST/out.txt"
+    # Started by name from its own folder: `cmd /c "<full path>"` drops the
+    # quotes when the path has an & in it (a double-click does not).
     ( cd "$APP"
       E2E_STATE="$ST" E2E_REQDIR="$(winpath "$ST/req")" WINEPATH="$(winpath "$WORK/bin")" \
-        python3 "$HERE/driver.py" "$OUT" "$ST/req" "$3" -- "$WINE" cmd /c "$(winpath "$APP/wsl-setup.bat")" ) \
+        python3 "$HERE/driver.py" "$OUT" "$ST/req" "$3" -- "$WINE" cmd /c wsl-setup.bat ) \
         || bad "driver: script did not follow the expected prompts (see console below)"
     kill "$DAEMON" 2>/dev/null; wait "$DAEMON" 2>/dev/null || true; DAEMON=""
     # strip ANSI colour codes and CRs for matching
@@ -172,7 +174,7 @@ has 'Default Distribution: Ubuntu-24.04'
 has '* Ubuntu-24.04'
 has 'To open Ubuntu 24.04 LTS later as Administrator, run start.bat next to'
 # start.bat is shipped, never rewritten by the .bat.
-cmp -s "$REPO/start.bat" "$ST/app/start.bat" && ok || bad "start.bat was modified"
+cmp -s "$REPO/start.bat" "$APP/start.bat" && ok || bad "start.bat was modified"
 [ "$(calls tmpnames)" = "ok" ] && ok || bad "temp script names: $(calls tmpnames)"
 [ -z "$(ls -A "$ST/root-Ubuntu-24.04/tmp")" ] && ok || bad "left behind in /tmp: $(ls -A "$ST/root-Ubuntu-24.04/tmp")"
 

@@ -1,4 +1,11 @@
 @echo off
+REM  This script's own folder and path are read while delayed expansion is
+REM  still off: with it on, cmd drops every "!" from %~dp0 and %~f0, and a
+REM  folder named e.g. "New!" could not be found again. From here on they are
+REM  only used as !SELF_DIR! and !SELF_PATH!, which keeps the value intact.
+setlocal DisableDelayedExpansion
+set "SELF_DIR=%~dp0"
+set "SELF_PATH=%~f0"
 setlocal EnableDelayedExpansion
 title WSL Setup
 
@@ -28,20 +35,6 @@ set "CLR_YELLOW=%ESC%[93m"
 set "CLR_RED=%ESC%[91m"
 set "CLR_BOLD=%ESC%[1m"
 
-REM --- A "!" in the folder path cannot work in this script: with delayed
-REM     expansion on, cmd drops it from %~dp0 and %~f0, so the elevation below
-REM     and every helper file would be looked for in a folder that does not
-REM     exist - and reported as "rights not granted" or "files are missing".
-REM     Say what is really wrong instead. Checked before elevating, so the
-REM     message is not preceded by a pointless UAC prompt.
-if not exist "%~dp0" (
-    echo %CLR_RED%[ERROR]%CLR_RESET% This tool cannot run from a folder with an exclamation
-    echo         mark in its path. Rename or move the folder, then run it again.
-    echo.
-    pause
-    exit /b 1
-)
-
 REM --- Self-elevate to Administrator ---
 REM  fltmc only succeeds elevated and, unlike `net session`, does not depend on
 REM  the Server service - with that service stopped, `net session` always
@@ -51,7 +44,7 @@ REM  command string, so a folder name containing an apostrophe still works.
 fltmc >nul 2>&1
 if not "%errorlevel%"=="0" (
     echo This tool needs Administrator rights. Requesting elevation...
-    set "WSL_SETUP_SELF=%~f0"
+    set "WSL_SETUP_SELF=!SELF_PATH!"
     powershell -NoProfile -Command "try { Start-Process -FilePath $env:WSL_SETUP_SELF -Verb RunAs -ErrorAction Stop } catch { exit 1 }"
     if errorlevel 1 (
         echo.
@@ -63,6 +56,13 @@ if not "%errorlevel%"=="0" (
     )
     exit /b
 )
+
+REM --- Work from this script's own folder (an elevated window starts in
+REM     System32). wsl.exe starts each Linux command in the current Windows
+REM     folder, so the shipped .sh files can be copied into the distro by
+REM     their plain name. That needs no wslpath call - and no Linux path
+REM     coming back through `for /f`, which would lose a "!" in it.
+cd /d "!SELF_DIR!"
 
 REM --- Check Windows version supports WSL (needs Win10 build 19041+ or Win11) ---
 for /f "usebackq delims=" %%b in (`powershell -NoProfile -Command "[System.Environment]::OSVersion.Version.Build"`) do set "winBuild=%%b"
@@ -88,7 +88,7 @@ REM     front, so a partial download fails here with a clear list instead of
 REM     halfway through an install.
 set "missing="
 for %%F in (setup-user.sh list-distros.ps1 install-distro.ps1 wait-distro.ps1 wsl-status.ps1 start.bat) do (
-    if not exist "%~dp0%%F" set "missing=!missing! %%F"
+    if not exist "!SELF_DIR!%%F" set "missing=!missing! %%F"
 )
 if defined missing (
     echo %CLR_RED%[ERROR]%CLR_RESET% These files are missing next to wsl-setup.bat:!missing!
@@ -144,7 +144,7 @@ REM     distro in this (already elevated) window. If WSL cannot start it
 REM     says why and waits for a key itself; either way the menu comes back.
 :STARTWSL
 echo.
-call "%~dp0start.bat"
+call "!SELF_DIR!start.bat"
 title WSL Setup
 goto MENU
 
@@ -163,7 +163,7 @@ REM  decodes the raw bytes, copes with any intro length or language, and
 REM  prints NAME^|FRIENDLY lines. If it finds nothing, it shows what wsl.exe
 REM  said on stderr, which for /f does not capture.
 set "DISTROCOUNT=0"
-for /f "usebackq tokens=1,* delims=|" %%D in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0list-distros.ps1"`) do (
+for /f "usebackq tokens=1,* delims=|" %%D in (`powershell -NoProfile -ExecutionPolicy Bypass -File "!SELF_DIR!list-distros.ps1"`) do (
     set /a DISTROCOUNT+=1
     set "DISTRONAME_!DISTROCOUNT!=%%D"
     set "DISTROFRIENDLY_!DISTROCOUNT!=%%E"
@@ -323,7 +323,7 @@ if "!alreadyInstalled!"=="1" (
 
     REM  install-distro.ps1 shows a progress bar, returns wsl.exe's exit
     REM  code, and prints wsl.exe's output itself if the install fails.
-    powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install-distro.ps1" -Distro "!selectedName!" -Friendly "!selectedFriendly!"
+    powershell -NoProfile -ExecutionPolicy Bypass -File "!SELF_DIR!install-distro.ps1" -Distro "!selectedName!" -Friendly "!selectedFriendly!"
     set "installResult=!errorlevel!"
 
     if not "!installResult!"=="0" (
@@ -342,7 +342,7 @@ echo Waiting for !selectedFriendly! to finish initializing ...
 echo ^(a first-ever WSL launch on this PC can take several minutes -
 echo   it is extracting and booting the distro for the first time^)
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0wait-distro.ps1" -Distro "!selectedName!"
+powershell -NoProfile -ExecutionPolicy Bypass -File "!SELF_DIR!wait-distro.ps1" -Distro "!selectedName!"
 set "waitResult=!errorlevel!"
 
 if "!waitResult!"=="0" goto READY
@@ -393,16 +393,6 @@ REM  Every value captured with `for /f` below is cleared first: when nothing
 REM  comes back, `for /f` leaves the variable untouched, and on a second
 REM  "install another" round a stale value from the first distro would be
 REM  silently reused - e.g. reporting [OK] for a user check that failed.
-set "SCRIPTWSL="
-for /f "usebackq delims=" %%P in (`wsl.exe -d !selectedName! -- wslpath -a "%~dp0setup-user.sh"`) do set "SCRIPTWSL=%%P"
-if not defined SCRIPTWSL (
-    echo %CLR_RED%[ERROR]%CLR_RESET% Could not map setup-user.sh into !selectedFriendly! with wslpath.
-    echo         This happens when the repo is on a drive WSL cannot see, such
-    echo         as some network shares. Copy the folder to C:\ and re-run.
-    call :CLEARCREDS
-    pause
-    goto MENU
-)
 REM  The copy goes into a file that root's own mktemp just created: a random
 REM  name, owned by root, mode 0600. A fixed /tmp name could be created first
 REM  by another user of an already-installed distro, who would then own the
@@ -412,7 +402,7 @@ REM  -1 for its own errors, which `if errorlevel 1` treats as success.
 set "TMPSCRIPT="
 for /f "usebackq delims=" %%T in (`wsl.exe -d !selectedName! -u root -- mktemp /tmp/wsl_setup_user.XXXXXXXX`) do set "TMPSCRIPT=%%T"
 if not defined TMPSCRIPT goto COPYFAIL
-wsl.exe -d !selectedName! -u root -- cp "!SCRIPTWSL!" "!TMPSCRIPT!"
+wsl.exe -d !selectedName! -u root -- cp ./setup-user.sh "!TMPSCRIPT!"
 if not "!errorlevel!"=="0" goto COPYFAIL
 wsl.exe -d !selectedName! -u root -- sed -i "s/\r$//" "!TMPSCRIPT!"
 if not "!errorlevel!"=="0" goto COPYFAIL
@@ -521,24 +511,21 @@ REM  Offered here (not chained automatically) so the core WSL setup stays fast
 REM  and self-contained; dev tools are a separate, slower, network-heavy step.
 REM  Runs as the distro's default user (the account just created) - no -u needed,
 REM  and the NOPASSWD sudo granted above lets its apt/docker steps run unattended.
-if not exist "%~dp0setup-dev-tools.sh" goto ASKAGAIN
+if not exist "!SELF_DIR!setup-dev-tools.sh" goto ASKAGAIN
 echo.
 set "devChoice="
 set /p devChoice="Install dev tools now inside !selectedFriendly! - Node, Docker, GitHub CLI? [y/n]: "
 if /i not "!devChoice!"=="y" goto ASKAGAIN
 echo.
 echo Running setup-dev-tools.sh inside !selectedFriendly! ...
-REM  Resolve the Windows path to a WSL path, copy it into a private temp file
+REM  Copy it by its plain name (see the cd at the top) into a private temp file
 REM  (the new user's own mktemp - see the note at setup-user.sh above), strip
 REM  CR - the file may be checked out with CRLF on Windows - then run it as
 REM  `bash <path>` with no shell metacharacters on the command line.
-set "DEVSCRIPTWSL="
 set "DEVTMP="
-for /f "usebackq delims=" %%S in (`wsl.exe -d !selectedName! -- wslpath -a "%~dp0setup-dev-tools.sh"`) do set "DEVSCRIPTWSL=%%S"
-if not defined DEVSCRIPTWSL goto DEVCOPYFAIL
 for /f "usebackq delims=" %%T in (`wsl.exe -d !selectedName! -- mktemp /tmp/wsl_setup_devtools.XXXXXXXX`) do set "DEVTMP=%%T"
 if not defined DEVTMP goto DEVCOPYFAIL
-wsl.exe -d !selectedName! -- cp "!DEVSCRIPTWSL!" "!DEVTMP!"
+wsl.exe -d !selectedName! -- cp ./setup-dev-tools.sh "!DEVTMP!"
 if not "!errorlevel!"=="0" goto DEVCOPYFAIL
 wsl.exe -d !selectedName! -- sed -i "s/\r$//" "!DEVTMP!"
 if not "!errorlevel!"=="0" goto DEVCOPYFAIL
@@ -595,7 +582,7 @@ REM     If WSL cannot start, start.bat says why and waits for a key itself.
 REM     The name is one this tool listed itself: letters, digits, . _ -
 :STARTAFTER
 echo.
-call "%~dp0start.bat" "!selectedName!"
+call "!SELF_DIR!start.bat" "!selectedName!"
 title WSL Setup
 goto ASKAGAIN
 
@@ -611,7 +598,9 @@ exit /b
 REM --- setup-user.sh could not be copied into the distro ---
 :COPYFAIL
 echo %CLR_RED%[ERROR]%CLR_RESET% Could not copy setup-user.sh into !selectedFriendly! - no account
-echo         was created. See any output above, then try again.
+echo         was created. See any output above, then try again. If this
+echo         folder is on a drive WSL cannot see, such as some network
+echo         shares, copy the folder to C:\ and run it from there.
 if defined TMPSCRIPT wsl.exe -d !selectedName! -u root -- rm -f "!TMPSCRIPT!" >nul 2>&1
 call :CLEARCREDS
 set "wslUser="
@@ -625,7 +614,7 @@ REM  way. Cleared first so a failed check never shows a stale result.
 :WSLSTATUS
 set "WSLSTATE="
 set "WSLSTATUS="
-for /f "usebackq tokens=1,* delims=|" %%A in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0wsl-status.ps1"`) do (
+for /f "usebackq tokens=1,* delims=|" %%A in (`powershell -NoProfile -ExecutionPolicy Bypass -File "!SELF_DIR!wsl-status.ps1"`) do (
     set "WSLSTATE=%%A"
     set "WSLSTATUS=%%B"
 )
