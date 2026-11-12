@@ -231,6 +231,31 @@ has 'Could not copy setup-user.sh into Debian GNU/Linux - no account'
 
 end_scenario
 
+# The distro installs but never answers. wait-distro.ps1's real 5-minute wait
+# and the Windows servicing key are replaced through its env hooks; a plain
+# file stands in for the registry key (Test-Path does not care).
+for kind in reboot notready; do
+    echo "=== E2E 6-$kind: installed distro never answers ($kind) ==="
+    KEYFILE="$WORK/reboot-pending-$kind"
+    if [ "$kind" = reboot ]; then
+        : > "$KEYFILE"; WANT='Windows needs a restart to finish enabling WSL.'; UNWANTED='did not become ready'
+    else
+        WANT='Ubuntu 24.04 LTS did not become ready after 5 minutes.'; UNWANTED='Windows needs a restart'
+    fi
+    WSL_SETUP_WAIT_TIMEOUT=3 WSL_SETUP_WAIT_INTERVAL=1 WSL_SETUP_REBOOT_KEYS="$KEYFILE" \
+    run_scenario "wait-$kind" '{"installed":[],"online":"utf16","never_ready":true}' "[
+      [$MENU, \"1\"], [$MENU, \"6\"], [$USER, \"dev\"], [\"@PASSWORD\", $PWJ],
+      [\"$WANT\", null], [$KEY, \"\"], [$MENU, \"0\"], [\"Done.\", null], [$KEY, \"\"]]"
+    has "$WANT"
+    grep -qF -- "$UNWANTED" "$OUT" && bad "console wrongly says: $UNWANTED" || ok
+    [ "$(calls installs)" = "Ubuntu-24.04" ] && ok || bad "installed [$(calls installs)], want Ubuntu-24.04"
+    [ "$(calls fwdcount)" = "0" ] && ok || bad "credentials forwarded to $(calls fwdcount) call(s) although the distro never started"
+    [ "$(grep -c 'Registration complete.' "$OUT")" = "0" ] && ok || bad "reported success for a distro that never started"
+    n=$(grep -c '"--version"' "$ST/calls.jsonl" || true)
+    [ "$n" = "2" ] && ok || bad "WSL status checked $n times, want 2"
+    end_scenario
+done
+
 echo
 echo "============================================"
 echo " E2E RESULTS: $pass passed, $fail failed"

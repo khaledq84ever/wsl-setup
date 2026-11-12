@@ -11,15 +11,18 @@ used - it is a registry value, not a key (so Test-Path on it was always
 false), and almost any installer sets it, which says nothing about WSL.
 
 -WslExe / -IntervalSec / -RebootKeys exist for the test harness;
-wsl-setup.bat uses the defaults.
+wsl-setup.bat uses the defaults. The end-to-end tests drive wsl-setup.bat
+itself and so cannot pass parameters; for them the defaults can be changed
+with WSL_SETUP_WAIT_TIMEOUT, WSL_SETUP_WAIT_INTERVAL (seconds) and
+WSL_SETUP_REBOOT_KEYS (paths separated by ;). Unset in normal use.
 #>
 param(
     [Parameter(Mandatory)] [string]$Distro,
     [string]$WslExe = 'wsl.exe',
-    [int]$TimeoutSec = 300,
-    [double]$IntervalSec = 5,
-    [string[]]$RebootKeys = @(
-        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending')
+    [int]$TimeoutSec = $(if ($env:WSL_SETUP_WAIT_TIMEOUT) { [int]$env:WSL_SETUP_WAIT_TIMEOUT } else { 300 }),
+    [double]$IntervalSec = $(if ($env:WSL_SETUP_WAIT_INTERVAL) { [double]$env:WSL_SETUP_WAIT_INTERVAL } else { 5 }),
+    [string[]]$RebootKeys = $(if ($env:WSL_SETUP_REBOOT_KEYS) { $env:WSL_SETUP_REBOOT_KEYS -split ';' } else {
+        @('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending') })
 )
 
 $started = Get-Date

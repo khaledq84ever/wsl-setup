@@ -162,7 +162,7 @@ class Console:
         return None
 
 
-def run_scenario(name, state, steps, work, bindir, bash, bat="wsl-setup.bat", args=()):
+def run_scenario(name, state, steps, work, bindir, bash, bat="wsl-setup.bat", args=(), extra_env=None):
     global SCEN
     SCEN = name
     st = os.path.join(work, name)
@@ -180,6 +180,7 @@ def run_scenario(name, state, steps, work, bindir, bash, bat="wsl-setup.bat", ar
     env = dict(os.environ)
     env.update({"E2E_STATE": st, "E2E_PYTHON": sys.executable, "E2E_FAKE": FAKE, "E2E_BASH": bash,
                 "PATH": bindir + os.pathsep + os.environ["PATH"]})
+    env.update(extra_env or {})
     # A list, not a string: pywinpty quotes each argument itself.
     con = Console(["cmd.exe", "/c", os.path.join(app, bat), *args], app, env)
     err = con.drive(steps)
@@ -389,6 +390,42 @@ def main():
         n = sum(1 for c in calls(st) if c["argv"] == ["--version"])
         check(n == 2, f"WSL status checked {n} times, want 2 (start, and again after the failed install)")
         if failed > before: shown.append(st)
+
+        # The distro installs but never answers. wait-distro.ps1 then decides
+        # between "restart pending" and "gave up"; its real 5-minute wait and
+        # the machine-wide servicing key are replaced through its env hooks
+        # (the key by one under HKCU that only this test creates).
+        fake_key = r"Software\wsl-setup-e2e\RebootPending"
+        waits = {"WSL_SETUP_WAIT_TIMEOUT": "3", "WSL_SETUP_WAIT_INTERVAL": "1",
+                 "WSL_SETUP_REBOOT_KEYS": "HKCU:\\" + fake_key}
+        for name, pending, want, unwanted in (
+                ("reboot", True, "Windows needs a restart to finish enabling WSL.", "did not become ready"),
+                ("notready", False, "Ubuntu 24.04 LTS did not become ready after 5 minutes.", "Windows needs a restart")):
+            print(f"=== WIN E2E 5-{name}: installed distro never answers, restart pending={pending} ===", flush=True)
+            if pending:
+                winreg.CloseKey(winreg.CreateKey(winreg.HKEY_CURRENT_USER, fake_key))
+            try:
+                st, out = run_scenario(f"wait-{name}", {"installed": [], "online": "utf16", "never_ready": True}, [
+                    [MENU, "1"], [MENU, "6"], [USER, "dev"], [PWD1, PW], [PWD2, PW],
+                    [want, None], [KEY, ""], [MENU, "0"], ["Done.", None], [KEY, ""]],
+                    work, bindir, bash, extra_env=waits)
+            finally:
+                if pending:
+                    winreg.DeleteKey(winreg.HKEY_CURRENT_USER, fake_key)
+                    winreg.DeleteKey(winreg.HKEY_CURRENT_USER, fake_key.rsplit("\\", 1)[0])
+            before = failed
+            check(installs(st) == ["Ubuntu-24.04"], f"installed {installs(st)}")
+            check(want in out, f"console lacks {want!r}")
+            check(unwanted not in out, f"console wrongly says {unwanted!r}")
+            probes = sum(1 for c in calls(st) if c["argv"][-2:] == ["--", "true"])
+            check(probes == 1 if pending else probes >= 2, f"{probes} readiness probes")
+            check("Registration complete." not in out, "reported success for a distro that never started")
+            check(not any(c["argv"][-2:-1] == ["bash"] for c in calls(st)), "a script was run in a distro that never started")
+            check(not any("PASS_B64" in c["forwarded"] or "USER_B64" in c["forwarded"] for c in calls(st)),
+                  "credentials forwarded although the distro never started")
+            n = sum(1 for c in calls(st) if c["argv"] == ["--version"])
+            check(n == 2, f"WSL status checked {n} times, want 2 (start, and again after the failed wait)")
+            if failed > before: shown.append(st)
 
         print("=== WIN E2E 6: start.bat, no distro for this account -> says why, waits ===", flush=True)
         st, out = run_scenario("start-nodistro", {"installed": [], "default": ""}, [[KEY, ""]],
