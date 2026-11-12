@@ -30,14 +30,22 @@ bad()  { fail=$((fail + 1)); FAILMSGS+=("$1"); }
 # ---- stub user-management tools so setup-user.sh runs unprivileged ----
 STUB=$(mktemp -d)
 WORKROOT=$(mktemp -d)
-trap 'rm -rf "$STUB" "$WORKROOT"' EXIT
+MINBIN=""
+trap 'rm -rf "$STUB" "$WORKROOT" ${MINBIN:+"$MINBIN"}' EXIT
 # useradd/usermod take no stdin; chpasswd reads a line - it MUST drain stdin,
 # or the upstream printf gets SIGPIPE (which under pipefail aborts the real
 # script we are testing).
-for t in useradd usermod; do
-    printf '#!/bin/sh\nexit 0\n' > "$STUB/$t"
-    chmod +x "$STUB/$t"
-done
+# Both record their arguments, so the tests can tell what was (not) called.
+# shellcheck disable=SC2016  # $VAR is meant to expand inside the stubs, not here
+printf '#!/bin/sh\necho "$*" >> "${USERADD_LOG:-/dev/null}"\nexit 0\n' > "$STUB/useradd"
+# USERMOD_FAIL: groups that "do not exist" on this distro (space separated).
+cat > "$STUB/usermod" <<'EOF2'
+#!/bin/sh
+echo "$*" >> "${USERMOD_LOG:-/dev/null}"
+for g in ${USERMOD_FAIL:-}; do [ "$2" = "$g" ] && exit 6; done
+exit 0
+EOF2
+chmod +x "$STUB/useradd" "$STUB/usermod"
 # It also records what it received, so the exact user:password line can be
 # asserted (catches any mangling of special characters on the way through).
 # shellcheck disable=SC2016  # $VAR is meant to expand inside the stub, not here
@@ -59,6 +67,7 @@ run_setup_user() {
     mkdir -p "$wd/sudoers.d"
     PATH="$STUB:$PATH" \
     CHPASSWD_LOG="$wd/chpasswd.in" \
+    USERADD_LOG="$wd/useradd.log" USERMOD_LOG="$wd/usermod.log" \
     USER_B64="$(printf '%s' "$user" | base64)" \
     PASS_B64="$(printf '%s' "$TEST_PASS" | base64 -w0)" \
     WSL_CONF_FILE="$wd/wsl.conf" \
@@ -95,6 +104,9 @@ for i in $(seq 1 "$ITER"); do
     else
         bad "way1#$i: fresh wsl.conf not exactly [user]/default"
     fi
+    # the account: created once, with a home directory and bash; added to sudo only
+    if [ "$(cat "$wd/useradd.log" 2>/dev/null)" = "-m -s /bin/bash $u" ]; then ok; else bad "way1#$i: useradd got [$(cat "$wd/useradd.log" 2>/dev/null)]"; fi
+    if [ "$(cat "$wd/usermod.log" 2>/dev/null)" = "-aG sudo $u" ]; then ok; else bad "way1#$i: usermod got [$(tr '\n' '|' < "$wd/usermod.log" 2>/dev/null)]"; fi
 done
 
 echo "=== WAY 2: preserve existing [boot] systemd=true (the clobber bug), ${ITER}x ==="
@@ -107,6 +119,20 @@ for i in $(seq 1 "$ITER"); do
         check_common "$wd" "$u" "way2#$i"
     else
         bad "way2#$i: systemd=true / [boot] was clobbered"
+    fi
+done
+
+echo "=== WAY 2b: existing wsl.conf whose last line has no newline, ${ITER}x ==="
+for i in $(seq 1 "$ITER"); do
+    wd="$WORKROOT/w2b_$i"; mkdir -p "$wd"
+    u=$(pick_user "$i")
+    printf '[boot]\nsystemd=true' > "$wd/wsl.conf"
+    run_setup_user "$wd" "$u" >/dev/null 2>&1
+    # [user] must start on its own line, not as "systemd=true[user]"
+    if grep -qx 'systemd=true' "$wd/wsl.conf" && grep -qx '\[user\]' "$wd/wsl.conf"; then
+        check_common "$wd" "$u" "way2b#$i"
+    else
+        bad "way2b#$i: [user] glued onto the unterminated last line: $(tr '\n' '|' < "$wd/wsl.conf")"
     fi
 done
 
@@ -126,6 +152,8 @@ for i in $(seq 1 "$ITER"); do
     else
         bad "way3#$i: re-run not idempotent (dup/clobber/stale default)"
     fi
+    # the second pass found the account in place: useradd ran for the first only
+    if [ "$(cat "$wd/useradd.log" 2>/dev/null)" = "-m -s /bin/bash $u1" ]; then ok; else bad "way3#$i: useradd called for an existing user: [$(tr '\n' '|' < "$wd/useradd.log" 2>/dev/null)]"; fi
 done
 
 echo "=== WAY 4: existing [user] section with no default= key, ${ITER}x ==="
@@ -184,6 +212,74 @@ for i in $(seq 1 "$ITER"); do
     fi
 done
 rm -f "$STUB/apt-get"
+
+echo "=== WAY 5b: sudo missing on a dnf / pacman / zypper distro, a failing one, and none, ${ITER}x ==="
+# PATH holds only what setup-user.sh needs plus ONE package manager, so the
+# host's apt-get cannot answer. Each manager must be asked for sudo with its
+# own syntax; a manager that fails, or none at all, must not stop the account
+# from being created.
+MINBIN=$(mktemp -d)
+for t in bash sh base64 mkdir chmod grep sed cat; do ln -s "$(command -v "$t")" "$MINBIN/$t"; done
+run_pm_case() {   # workdir user pm-or-none pm-exit-code
+    local wd="$1" user="$2" pm="$3" rc="$4" pmdir="$1/pm"
+    mkdir -p "$pmdir"
+    if [ "$pm" != none ]; then
+        printf '#!/bin/sh\necho "$*" >> "%s"\nexit %s\n' "$wd/pm.log" "$rc" > "$pmdir/$pm"
+        chmod +x "$pmdir/$pm"
+    fi
+    PATH="$pmdir:$STUB:$MINBIN" CHPASSWD_LOG="$wd/chpasswd.in" \
+    WSL_SUDO_CMD="no-such-sudo" \
+    USER_B64="$(printf '%s' "$user" | base64)" PASS_B64="$(printf '%s' "$TEST_PASS" | base64 -w0)" \
+    WSL_CONF_FILE="$wd/wsl.conf" WSL_SUDOERS_DIR="$wd/sudoers.d" \
+    "$MINBIN/bash" "$REPO/setup-user.sh" >/dev/null 2>"$wd/stderr"
+}
+for i in $(seq 1 "$ITER"); do
+    u=$(pick_user "$i")
+    for case in "dnf|install -y sudo" "pacman|-Syu --noconfirm --needed sudo" "zypper|--non-interactive install sudo"; do
+        pm=${case%%|*}; want=${case#*|}
+        wd="$WORKROOT/w5b_${pm}_$i"; mkdir -p "$wd"
+        if run_pm_case "$wd" "$u" "$pm" 0 && [ "$(cat "$wd/pm.log" 2>/dev/null)" = "$want" ]; then
+            check_common "$wd" "$u" "way5b-$pm#$i"
+        else
+            bad "way5b-$pm#$i: $pm got [$(cat "$wd/pm.log" 2>/dev/null)], want [$want]"
+        fi
+    done
+    # the package manager fails (no network): warned, account still created
+    wd="$WORKROOT/w5b_fail_$i"; mkdir -p "$wd"
+    if run_pm_case "$wd" "$u" dnf 1 && grep -q 'WARN: could not install sudo via dnf' "$wd/stderr"; then
+        check_common "$wd" "$u" "way5b-fail#$i"
+    else
+        bad "way5b-fail#$i: a failed sudo install stopped the script or was not reported"
+    fi
+    # no known package manager at all: warned, account still created
+    wd="$WORKROOT/w5b_none_$i"; mkdir -p "$wd"
+    if run_pm_case "$wd" "$u" none 0 && grep -q 'WARN: no known package manager found' "$wd/stderr"; then
+        check_common "$wd" "$u" "way5b-none#$i"
+    else
+        bad "way5b-none#$i: no package manager stopped the script or was not reported"
+    fi
+done
+rm -rf "$MINBIN"
+
+echo "=== WAY 6: admin group - sudo, else wheel, else carry on, ${ITER}x ==="
+for i in $(seq 1 "$ITER"); do
+    u=$(pick_user "$i")
+    # Fedora/Arch/openSUSE: no 'sudo' group -> 'wheel' is tried next
+    wd="$WORKROOT/w6a_$i"; mkdir -p "$wd"
+    if USERMOD_FAIL="sudo" run_setup_user "$wd" "$u" >/dev/null 2>&1 \
+       && [ "$(cat "$wd/usermod.log")" = "$(printf -- '-aG sudo %s\n-aG wheel %s' "$u" "$u")" ]; then
+        check_common "$wd" "$u" "way6a#$i"
+    else
+        bad "way6a#$i: wheel fallback: usermod got [$(tr '\n' '|' < "$wd/usermod.log" 2>/dev/null)]"
+    fi
+    # neither group exists: the NOPASSWD rule still grants sudo, so no abort
+    wd="$WORKROOT/w6b_$i"; mkdir -p "$wd"
+    if USERMOD_FAIL="sudo wheel" run_setup_user "$wd" "$u" >/dev/null 2>&1; then
+        check_common "$wd" "$u" "way6b#$i"
+    else
+        bad "way6b#$i: script aborted because neither admin group exists"
+    fi
+done
 
 # ---- setup-dev-tools.sh wsl.conf logic: the REAL function, sourced ----
 SUDO=""   # write directly - no sudo in the harness

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""mutate.py - mutation run for the PowerShell helpers wsl-setup.bat ships.
+"""mutate.py - mutation run for the helper scripts wsl-setup.bat ships: the
+four PowerShell helpers and the two shell scripts that run inside the distro.
 
 For each helper it plants one deliberate bug at a time (wrong exit code,
 inverted check, a dropped argument, a removed safety step ...), runs that
@@ -8,11 +9,17 @@ afterwards, also on Ctrl-C. Exit code 1 if a mutant survives - that is a gap
 in the tests, not in the helper.
 
   python3 test/mutation/mutate.py                 all helpers
-  python3 test/mutation/mutate.py wait install    only these (wait, install, list, status)
+  python3 test/mutation/mutate.py wait install    only these (wait, install, list, status,
+                                                  user, devtools)
 
 PWSH=... picks the PowerShell (default pwsh); PWSH=powershell runs it on
 Windows PowerShell 5.1, as the CI "mutation" job does. Mutants marked PS51
 only show on 5.1 (they undo a 5.1 workaround) and are skipped elsewhere.
+
+The shell scripts (user, devtools) are tested by test/run-tests.sh, run here
+with ITER=2 and without its PowerShell and end-to-end parts. Only
+enable_systemd is mutated in setup-dev-tools.sh: the rest of that script
+installs packages and is only run for real, by the real-WSL CI job.
 
 Not part of test/run-tests.sh: it takes several minutes, because a mutant
 that makes a helper wait forever is only caught by its tests hanging.
@@ -90,11 +97,54 @@ STATUS = [
  ("timeout 100x longer", "$p.WaitForExit($TimeoutSec * 1000)", "$p.WaitForExit($TimeoutSec * 100000)"),
 ]
 
+USER = [
+ ("user name not base64-decoded", "u=$(printf '%s' \"$USER_B64\" | base64 -d)", "u=$USER_B64"),
+ ("password not base64-decoded", "p=$(printf '%s' \"$PASS_B64\" | base64 -d)", "p=$PASS_B64"),
+ ("account never created", "id -u \"$u\" >/dev/null 2>&1 || useradd -m -s /bin/bash \"$u\"\n", ""),
+ ("account created even if it exists", "id -u \"$u\" >/dev/null 2>&1 || useradd", "useradd"),
+ ("no home directory (-m dropped)", "useradd -m -s /bin/bash", "useradd -s /bin/bash"),
+ ("login shell not bash", "useradd -m -s /bin/bash", "useradd -m -s /bin/sh"),
+ ("password set to the user name", "printf '%s:%s\\n' \"$u\" \"$p\" | chpasswd", "printf '%s:%s\\n' \"$u\" \"$u\" | chpasswd"),
+ ("password never set", "printf '%s:%s\\n' \"$u\" \"$p\" | chpasswd\n", ""),
+ ("not added to the sudo group", "usermod -aG sudo \"$u\" 2>/dev/null || usermod", "usermod"),
+ ("no wheel fallback", "|| usermod -aG wheel \"$u\" 2>/dev/null || true", "|| true"),
+ ("a missing admin group aborts the script", "usermod -aG wheel \"$u\" 2>/dev/null || true", "usermod -aG wheel \"$u\" 2>/dev/null"),
+ ("sudoers.d not created", "mkdir -p \"$SUDOERS_DIR\"\n", ""),
+ ("sudo still asks for a password", "ALL=(ALL) NOPASSWD:ALL\\n'", "ALL=(ALL) ALL\\n'"),
+ ("sudoers file world-readable", "chmod 0440", "chmod 0644"),
+ ("sudo not installed with apt-get", "DEBIAN_FRONTEND=noninteractive apt-get install -y sudo; }", "true; }"),
+ ("sudo not installed with dnf", "dnf install -y sudo ||", "true ||"),
+ ("sudo not installed with pacman", "pacman -Syu --noconfirm --needed sudo ||", "true ||"),
+ ("sudo not installed with zypper", "zypper --non-interactive install sudo ||", "true ||"),
+ ("a failed sudo install aborts account creation", "|| echo \"WARN: could not install sudo via dnf\" >&2", ""),
+ ("no package manager aborts account creation", "        echo \"WARN: no known package manager found - install sudo manually\" >&2\n", "        exit 1\n"),
+ ("indented [user] section not recognised", "grep -Eq '^[[:space:]]*\\[user\\]'", "grep -q '^\\[user\\]'"),
+ ("spaced default = not recognised", "grep -Eq '^[[:space:]]*default[[:space:]]*='", "grep -q '^default='"),
+ ("existing default not replaced", "sed -i -E \"s/^[[:space:]]*default[[:space:]]*=.*/default=$u/\"", "sed -i -E \"s/^nothing$/default=$u/\""),
+ ("default not added under an existing [user]", "sed -i -E \"/^[[:space:]]*\\[user\\]/a default=$u\"", "sed -i -E \"/^nothing$/a default=$u\""),
+ ("existing wsl.conf overwritten", "printf '\\n[user]\\ndefault=%s\\n' \"$u\" >> \"$CONF_FILE\"", "printf '\\n[user]\\ndefault=%s\\n' \"$u\" > \"$CONF_FILE\""),
+ ("[user] glued onto an unterminated last line", "printf '\\n[user]\\ndefault=%s\\n' \"$u\" >>", "printf '[user]\\ndefault=%s\\n' \"$u\" >>"),
+ ("no wsl.conf written on a fresh distro", "    printf '[user]\\ndefault=%s\\n' \"$u\" > \"$CONF_FILE\"\n", "    :\n"),
+]
+
+DEVTOOLS = [
+ ("already enabled: return 1 -> 0", "*true[[:space:]]*$' \"$conf\"; then\n        return 1", "*true[[:space:]]*$' \"$conf\"; then\n        return 0"),
+ ("changed: return 0 -> 1", "    fi\n    return 0\n}", "    fi\n    return 1\n}"),
+ ("any systemd= line counts as enabled", "systemd[[:space:]]*=[[:space:]]*true[[:space:]]*$' \"$conf\"; then", "systemd[[:space:]]*=' \"$conf\"; then"),
+ ("systemd=false not flipped", "s/^[[:space:]]*systemd[[:space:]]*=.*/systemd=true/'", "s/^[[:space:]]*systemd[[:space:]]*=.*/systemd=false/'"),
+ ("existing systemd= line ignored (second one added)", "if [ -f \"$conf\" ] && grep -Eq '^[[:space:]]*systemd[[:space:]]*=' \"$conf\"; then", "if false; then"),
+ ("existing [boot] ignored (second one added)", "elif [ -f \"$conf\" ] && grep -q '^\\[boot\\]' \"$conf\"; then", "elif false; then"),
+ ("[boot] glued onto an unterminated last line", "nl=$'\\n'", "nl=''"),
+ ("wsl.conf overwritten instead of appended", "| $SUDO tee -a \"$conf\" >/dev/null", "| $SUDO tee \"$conf\" >/dev/null"),
+]
+
 TARGETS = {
     "wait":    ("wait-distro.ps1",    "install-wait.tests.ps1", WAIT),
     "install": ("install-distro.ps1", "install-wait.tests.ps1", INSTALL),
     "list":    ("list-distros.ps1",   "list-distros.tests.ps1", LIST),
     "status":  ("wsl-status.ps1",     "wsl-status.tests.ps1",   STATUS),
+    "user":     ("setup-user.sh",      "run-tests.sh", USER),
+    "devtools": ("setup-dev-tools.sh", "run-tests.sh", DEVTOOLS),
 }
 
 
@@ -105,7 +155,15 @@ def run_tests(test, fail_fast=True):
     env = dict(os.environ)
     if fail_fast:
         env["TEST_FAIL_FAST"] = "1"
-    p = subprocess.Popen([pwsh, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", os.path.join(repo, "test", test)],
+    if test.endswith(".sh"):
+        # The shell harness only: few iterations, no PowerShell tests (they do
+        # not touch the shell scripts), no end-to-end run.
+        env.update({"ITER": "2", "PWSH": "no-such-pwsh-for-mutation"})
+        env.pop("E2E", None)
+        cmd = ["bash", os.path.join(repo, "test", test)]
+    else:
+        cmd = [pwsh, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", os.path.join(repo, "test", test)]
+    p = subprocess.Popen(cmd,
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env,
                          start_new_session=(os.name != "nt"))
     try:
