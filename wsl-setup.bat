@@ -57,6 +57,13 @@ if not "%errorlevel%"=="0" (
     exit /b
 )
 
+REM --- Work from this script's own folder (an elevated window starts in
+REM     System32). wsl.exe starts each Linux command in the current Windows
+REM     folder, so the shipped .sh files can be copied into the distro by
+REM     their plain name. That needs no wslpath call - and no Linux path
+REM     coming back through `for /f`, which would lose a "!" in it.
+cd /d "!SELF_DIR!"
+
 REM --- Check Windows version supports WSL (needs Win10 build 19041+ or Win11) ---
 for /f "usebackq delims=" %%b in (`powershell -NoProfile -Command "[System.Environment]::OSVersion.Version.Build"`) do set "winBuild=%%b"
 REM  If PowerShell returned nothing, skip the check rather than crash on a
@@ -386,16 +393,6 @@ REM  Every value captured with `for /f` below is cleared first: when nothing
 REM  comes back, `for /f` leaves the variable untouched, and on a second
 REM  "install another" round a stale value from the first distro would be
 REM  silently reused - e.g. reporting [OK] for a user check that failed.
-set "SCRIPTWSL="
-for /f "usebackq delims=" %%P in (`wsl.exe -d !selectedName! -- wslpath -a "!SELF_DIR!setup-user.sh"`) do set "SCRIPTWSL=%%P"
-if not defined SCRIPTWSL (
-    echo %CLR_RED%[ERROR]%CLR_RESET% Could not map setup-user.sh into !selectedFriendly! with wslpath.
-    echo         This happens when the repo is on a drive WSL cannot see, such
-    echo         as some network shares. Copy the folder to C:\ and re-run.
-    call :CLEARCREDS
-    pause
-    goto MENU
-)
 REM  The copy goes into a file that root's own mktemp just created: a random
 REM  name, owned by root, mode 0600. A fixed /tmp name could be created first
 REM  by another user of an already-installed distro, who would then own the
@@ -405,7 +402,7 @@ REM  -1 for its own errors, which `if errorlevel 1` treats as success.
 set "TMPSCRIPT="
 for /f "usebackq delims=" %%T in (`wsl.exe -d !selectedName! -u root -- mktemp /tmp/wsl_setup_user.XXXXXXXX`) do set "TMPSCRIPT=%%T"
 if not defined TMPSCRIPT goto COPYFAIL
-wsl.exe -d !selectedName! -u root -- cp "!SCRIPTWSL!" "!TMPSCRIPT!"
+wsl.exe -d !selectedName! -u root -- cp ./setup-user.sh "!TMPSCRIPT!"
 if not "!errorlevel!"=="0" goto COPYFAIL
 wsl.exe -d !selectedName! -u root -- sed -i "s/\r$//" "!TMPSCRIPT!"
 if not "!errorlevel!"=="0" goto COPYFAIL
@@ -521,17 +518,14 @@ set /p devChoice="Install dev tools now inside !selectedFriendly! - Node, Docker
 if /i not "!devChoice!"=="y" goto ASKAGAIN
 echo.
 echo Running setup-dev-tools.sh inside !selectedFriendly! ...
-REM  Resolve the Windows path to a WSL path, copy it into a private temp file
+REM  Copy it by its plain name (see the cd at the top) into a private temp file
 REM  (the new user's own mktemp - see the note at setup-user.sh above), strip
 REM  CR - the file may be checked out with CRLF on Windows - then run it as
 REM  `bash <path>` with no shell metacharacters on the command line.
-set "DEVSCRIPTWSL="
 set "DEVTMP="
-for /f "usebackq delims=" %%S in (`wsl.exe -d !selectedName! -- wslpath -a "!SELF_DIR!setup-dev-tools.sh"`) do set "DEVSCRIPTWSL=%%S"
-if not defined DEVSCRIPTWSL goto DEVCOPYFAIL
 for /f "usebackq delims=" %%T in (`wsl.exe -d !selectedName! -- mktemp /tmp/wsl_setup_devtools.XXXXXXXX`) do set "DEVTMP=%%T"
 if not defined DEVTMP goto DEVCOPYFAIL
-wsl.exe -d !selectedName! -- cp "!DEVSCRIPTWSL!" "!DEVTMP!"
+wsl.exe -d !selectedName! -- cp ./setup-dev-tools.sh "!DEVTMP!"
 if not "!errorlevel!"=="0" goto DEVCOPYFAIL
 wsl.exe -d !selectedName! -- sed -i "s/\r$//" "!DEVTMP!"
 if not "!errorlevel!"=="0" goto DEVCOPYFAIL
@@ -604,7 +598,9 @@ exit /b
 REM --- setup-user.sh could not be copied into the distro ---
 :COPYFAIL
 echo %CLR_RED%[ERROR]%CLR_RESET% Could not copy setup-user.sh into !selectedFriendly! - no account
-echo         was created. See any output above, then try again.
+echo         was created. See any output above, then try again. If this
+echo         folder is on a drive WSL cannot see, such as some network
+echo         shares, copy the folder to C:\ and run it from there.
 if defined TMPSCRIPT wsl.exe -d !selectedName! -u root -- rm -f "!TMPSCRIPT!" >nul 2>&1
 call :CLEARCREDS
 set "wslUser="

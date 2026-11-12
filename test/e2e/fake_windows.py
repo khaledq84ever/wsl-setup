@@ -229,8 +229,6 @@ def fake_wsl(argv, env):
             if s.get("never_ready"):
                 return err("Error code: Wsl/Service/CreateInstance/E_FAIL\r\n", -1)
         return out("")
-    if cmd[:2] == ["wslpath", "-a"]:
-        return out(win_to_unix(cmd[2]) + "\n")
     if cmd[:1] == ["whoami"] or cmd == ["id", "-un"]:
         return out(user + "\n")
     if cmd[:1] == ["mktemp"] and len(cmd) == 2 and cmd[1].startswith("/tmp/"):
@@ -258,7 +256,16 @@ def fake_wsl(argv, env):
         if not os.path.exists(m(cmd[2])):
             # The .bat must only ever copy onto a file mktemp just made.
             return err(f"fake wsl: cp target {cmd[2]!r} was not created by mktemp\n", 1)
-        shutil.copyfile(cmd[1], m(cmd[2]))
+        # Like the real wsl.exe, the command runs in the folder cmd.exe is in
+        # (under Wine the proxy reports it), so a plain file name is looked
+        # up there - and is not found if the .bat forgot to cd to its folder.
+        src = cmd[1]
+        if not ON_WINDOWS or not os.path.isabs(src):
+            cwd = win_to_unix(env["E2E_PROXY_CWD"]) if "E2E_PROXY_CWD" in env else os.getcwd()
+            src = os.path.join(cwd, src)
+        if not os.path.isfile(src):
+            return err(f"cp: cannot stat {cmd[1]!r}: No such file or directory\n", 1)
+        shutil.copyfile(src, m(cmd[2]))
         return out("")
     if cmd[:2] == ["sed", "-i"]:
         # The only sed the .bat uses: strip CRs from a CRLF checkout.
@@ -275,7 +282,7 @@ def fake_wsl(argv, env):
         return out("")
     if cmd[:1] == ["bash"] and len(cmd) == 2 and cmd[1].startswith("/tmp/wsl_setup_devtools."):
         # Don't really install Node/Docker/gh. Prove the plumbing instead: the
-        # script that arrived (after wslpath/cp/sed) must be byte-identical
+        # script that arrived (after cp/sed) must be byte-identical
         # to the repo's LF setup-dev-tools.sh, and record who ran it.
         repo = os.path.join(HERE, "..", "..", "setup-dev-tools.sh")
         want = open(repo, "rb").read().replace(b"\r\n", b"\n")
