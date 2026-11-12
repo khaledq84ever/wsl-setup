@@ -34,8 +34,9 @@ STEP_TIMEOUT = float(os.environ.get("E2E_STEP_TIMEOUT", "180"))
 ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[=>()][0-9A-Za-z]?")
 
 # The .bat runs from a folder named the way a second download of the repo zip
-# is: a space and brackets, which cmd treats specially outside quotes.
-APPDIR = "wsl-setup-main (1)"
+# is, plus an ampersand: spaces, brackets and & are all special to cmd outside
+# quotes.
+APPDIR = "wsl-setup-main (1) & co"
 
 passed = failed = 0
 SCEN = ""
