@@ -162,7 +162,7 @@ class Console:
         return None
 
 
-def run_scenario(name, state, steps, work, bindir, bash, bat="wsl-setup.bat"):
+def run_scenario(name, state, steps, work, bindir, bash, bat="wsl-setup.bat", args=()):
     global SCEN
     SCEN = name
     st = os.path.join(work, name)
@@ -181,7 +181,7 @@ def run_scenario(name, state, steps, work, bindir, bash, bat="wsl-setup.bat"):
     env.update({"E2E_STATE": st, "E2E_PYTHON": sys.executable, "E2E_FAKE": FAKE, "E2E_BASH": bash,
                 "PATH": bindir + os.pathsep + os.environ["PATH"]})
     # A list, not a string: pywinpty quotes each argument itself.
-    con = Console(["cmd.exe", "/c", os.path.join(app, bat)], app, env)
+    con = Console(["cmd.exe", "/c", os.path.join(app, bat), *args], app, env)
     err = con.drive(steps)
     out = con.text()
     open(os.path.join(st, "out.txt"), "w", encoding="utf-8").write(out)
@@ -293,7 +293,7 @@ def main():
         for line in ("Setup finished. What next?", "1.  Start WSL now", "2.  Install another distro"):
             check(line in out, f"post-install menu lacks {line!r}")
         check('"y" is not a valid option.' in out, "bad post-install choice not rejected")
-        check([c["argv"] for c in calls(st)][-2:] == [["--", "true"], []],
+        check([c["argv"] for c in calls(st)][-2:] == [["-d", "Debian", "--", "true"], ["-d", "Debian"]],
               f"Start WSL now did not open the shell last: {[c['argv'] for c in calls(st)][-2:]}")
         check(out.count("Setup finished. What next?") == 3, "post-install menu did not come back after the shell")
         check("Debian GNU/Linux is already installed - skipping install," in out, "not detected as installed")
@@ -365,6 +365,23 @@ def main():
         before = failed
         check([c["argv"] for c in calls(st)] == [["--", "true"], []], f"wsl calls {[c['argv'] for c in calls(st)]}")
         check("[ERROR]" not in out and KEY not in out, "error or pause on the working path")
+        if failed > before: shown.append(st)
+
+        print("=== WIN E2E 8b: start.bat <distro> opens that distro, not the (broken) default ===", flush=True)
+        st, out = run_scenario("start-named", {"installed": ["Debian"], "default": "Gone"}, [
+            ["fake shell as root", None]], work, bindir, bash, bat="start.bat", args=("Debian",))
+        before = failed
+        check([c["argv"] for c in calls(st)] == [["-d", "Debian", "--", "true"], ["-d", "Debian"]],
+              f"wsl calls {[c['argv'] for c in calls(st)]}")
+        check("[ERROR]" not in out and KEY not in out, "error or pause on the named path")
+        if failed > before: shown.append(st)
+
+        print("=== WIN E2E 8c: start.bat with something that is not a distro name -> refused ===", flush=True)
+        st, out = run_scenario("start-badname", {"installed": ["Debian"], "default": "Debian"}, [[KEY, ""]],
+                               work, bindir, bash, bat="start.bat", args=("no/such",))
+        before = failed
+        check("[ERROR] That is not a distro name." in out, "bad distro name not refused")
+        check(not os.path.exists(os.path.join(st, "calls.jsonl")) or calls(st) == [], "wsl.exe was run with a bad name")
         if failed > before: shown.append(st)
 
         print("=== WIN E2E 9: main menu 2 = Start WSL, then 1 -> distro list -> 0 Back -> 0 Exit ===", flush=True)

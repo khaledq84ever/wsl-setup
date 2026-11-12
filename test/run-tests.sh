@@ -143,6 +143,24 @@ for i in $(seq 1 "$ITER"); do
     fi
 done
 
+echo "=== WAY 4b: hand-edited '  default = old' under an indented [user], ${ITER}x ==="
+for i in $(seq 1 "$ITER"); do
+    wd="$WORKROOT/w4b_$i"; mkdir -p "$wd"
+    u=$(pick_user "$i")
+    printf '[boot]\nsystemd=true\n  [user]\n  default = olduser\n' > "$wd/wsl.conf"
+    run_setup_user "$wd" "$u" >/dev/null 2>&1
+    # the old default must be replaced, not kept next to a second one
+    if grep -qx 'systemd=true' "$wd/wsl.conf" \
+       && ! grep -q 'olduser' "$wd/wsl.conf" \
+       && [ "$(grep -Ec '^[[:space:]]*default[[:space:]]*=' "$wd/wsl.conf")" = "1" ] \
+       && [ "$(grep -Ec '^[[:space:]]*\[user\]' "$wd/wsl.conf")" = "1" ] \
+       && grep -qx "default=$u" "$wd/wsl.conf"; then
+        ok
+    else
+        bad "way4b#$i: spaced default= not replaced in place: $(tr '\n' '|' < "$wd/wsl.conf")"
+    fi
+done
+
 echo "=== WAY 5: sudo missing -> installed via the distro package manager, ${ITER}x ==="
 # A stub apt-get records that it was asked to install sudo; WSL_SUDO_CMD points
 # the "is sudo installed?" probe at a name that cannot exist. Also removes the

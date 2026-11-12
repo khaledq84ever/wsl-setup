@@ -9,10 +9,15 @@ REM the path goes to PowerShell via an env var, so folder names with an
 REM apostrophe still work. Distros belong to one Windows account, so this
 REM opens the distros of the account that approves the UAC prompt - the same
 REM one wsl-setup.bat installed them for.
+REM
+REM Usage: start.bat [distro]   - with no name it opens the default distro.
+REM wsl-setup.bat passes the name of the distro it has just set up, so its
+REM "Start WSL now" opens exactly that one even if another is the default.
+set "WSL_START_DISTRO=%~1"
 fltmc >nul 2>&1
 if not "%errorlevel%"=="0" (
     set "WSL_START_SELF=%~f0"
-    powershell -NoProfile -Command "try { Start-Process -FilePath $env:WSL_START_SELF -Verb RunAs -ErrorAction Stop } catch { exit 1 }"
+    powershell -NoProfile -Command "$a = @{ FilePath = $env:WSL_START_SELF; Verb = 'RunAs' }; if ($env:WSL_START_DISTRO) { $a.ArgumentList = $env:WSL_START_DISTRO }; try { Start-Process @a -ErrorAction Stop } catch { exit 1 }"
     if errorlevel 1 (
         echo Administrator rights were not granted - WSL was not started.
         pause
@@ -35,11 +40,32 @@ if errorlevel 1 goto NODISTRO
 
 REM  A quick no-op first: if the distro cannot start, wsl.exe prints its own
 REM  error here and the reason is still on screen for the hints below.
+if defined WSL_START_DISTRO goto NAMED
+REM  Not `if errorlevel 1`: wsl.exe exits with -1 for its own errors (such
+REM  as WSL_E_DISTRO_NOT_FOUND), and -1 is not ">= 1".
 wsl.exe -- true
-if errorlevel 1 goto CANTSTART
+if not "%errorlevel%"=="0" goto CANTSTART
 
 wsl.exe
 exit /b
+
+:NAMED
+REM  The name goes onto the wsl.exe command line as it is - wsl.exe looks
+REM  for a distro whose name includes the quotes if it is quoted - so only
+REM  a plain distro name is let through. Checked from an env var, never
+REM  spliced into the PowerShell command.
+powershell -NoProfile -Command "if ($env:WSL_START_DISTRO -cmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') { exit 0 } else { exit 1 }"
+if errorlevel 1 goto BADNAME
+wsl.exe -d %WSL_START_DISTRO% -- true
+if not "%errorlevel%"=="0" goto CANTSTART
+
+wsl.exe -d %WSL_START_DISTRO%
+exit /b
+
+:BADNAME
+echo.
+echo [ERROR] That is not a distro name. Use a name from:  wsl --list --verbose
+goto FAIL
 
 :NOWSL
 echo.
