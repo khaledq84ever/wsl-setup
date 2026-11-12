@@ -37,6 +37,10 @@ function Run([string]$script, [string[]]$a) {
 }
 
 Write-Host '=== INSTALL-DISTRO ==='
+# install-distro.ps1 keeps wsl.exe's output in two temp files while it runs;
+# none may be left behind, on success or failure (checked after its tests).
+function Get-InstallLogs { @(Get-ChildItem -LiteralPath ([IO.Path]::GetTempPath()) -Filter 'wsl_setup_install_*' -ErrorAction SilentlyContinue | ForEach-Object Name) }
+$logsBefore = Get-InstallLogs
 $argsFile = "$tmp/install-args"
 $ok = New-Fake 'wsl-ok' "echo `"`$*`" > '$argsFile'; for p in 10.0 55.5 100.0; do echo `"Downloading: `$p%`"; sleep 0.2; done; exit 0"
 $r = Run $install @('-Distro', 'Ubuntu-24.04', '-Friendly', "Ubuntu 24.04 LTS (it's fine)", '-WslExe', $ok, '-PollMs', '50')
@@ -65,6 +69,9 @@ if ($r.Code -eq 0 -and $r.Out -notmatch 'Exception') { Ok } else { Bad "empty-lo
 
 $r = Run $install @('-Distro', 'X', '-WslExe', (Join-Path $tmp 'missing'))
 if ($r.Code -eq 1) { Ok } else { Bad "missing wsl.exe: exit $($r.Code), want 1" }
+
+$left = @(Get-InstallLogs | Where-Object { $logsBefore -notcontains $_ })
+if ($left.Count -eq 0) { Ok } else { Bad "install-distro.ps1 left log files behind: $($left -join ', ')" }
 
 Write-Host '=== WAIT-DISTRO ==='
 $count = "$tmp/count"

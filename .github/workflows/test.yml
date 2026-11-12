@@ -102,12 +102,27 @@ jobs:
           E2E_STEP_TIMEOUT: "120"
         run: python test/e2e/windows/run_e2e_windows.py
 
+  # Mutation run for the helpers whose unit tests only run on Linux
+  # (list-distros.ps1, wsl-status.ps1): one planted bug at a time, and every
+  # one must make that helper's tests fail. Its own job, so the minutes it
+  # takes run next to the other jobs instead of on top of them.
+  mutation-linux:
+    name: Linux - mutation run (list-distros.ps1, wsl-status.ps1)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Mutation run - every planted bug must be caught
+        env:
+          PWSH: pwsh
+        run: python3 test/mutation/mutate.py list status
+
   # The unit tests of install-distro.ps1 / wait-distro.ps1 on the PowerShell
-  # that really runs them (5.1), then the mutation run: one planted bug at a
-  # time in wait-distro.ps1 (exit codes, probe result, restart check,
-  # timeout) - every one must make those tests fail.
+  # that really runs them (5.1), then the mutation run for both, including
+  # the mutants that undo a 5.1-only workaround.
   mutation:
-    name: Windows PowerShell 5.1 - unit tests + mutation run (wait-distro.ps1)
+    name: Windows PowerShell 5.1 - unit tests + mutation run (install-distro.ps1, wait-distro.ps1)
     runs-on: windows-2022
     timeout-minutes: 30
     steps:
@@ -127,7 +142,7 @@ jobs:
       - name: Mutation run - every planted bug must be caught
         env:
           PWSH: powershell
-        run: python test/mutation/wait-distro.py
+        run: python test/mutation/mutate.py wait install
 
   # No fakes at all: Microsoft's wsl.exe and a real distro. setup-wsl makes
   # sure WSL works on the hosted runner (and registers Debian-13, so the .bat

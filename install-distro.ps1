@@ -43,6 +43,9 @@ try {
         -RedirectStandardOutput $outLog -RedirectStandardError $errLog
 } catch {
     Write-Host "Could not start ${WslExe}: $($_.Exception.Message)"
+    # Start-Process creates the redirect files before it finds out that it
+    # cannot start the program.
+    Remove-Item -LiteralPath $outLog, $errLog -ErrorAction SilentlyContinue
     exit 1
 }
 # Windows PowerShell 5.1 quirk: without touching .Handle while the process is
