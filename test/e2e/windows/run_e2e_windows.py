@@ -28,7 +28,10 @@ FAKE = os.path.join(E2E, "fake_windows.py")
 SYS_WSL = os.path.join(os.environ["SystemRoot"], "System32", "wsl.exe")
 LXSS = r"Software\Microsoft\Windows\CurrentVersion\Lxss"
 STEP_TIMEOUT = float(os.environ.get("E2E_STEP_TIMEOUT", "180"))
-ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07|\x1b[=>()][0-9A-Za-z]?")
+# An OSC (window title etc.) ends at BEL or at ST (ESC \\) and never spans
+# another ESC: matching "up to the next BEL" let one ST-terminated title
+# swallow all console text up to the BEL in a later bash prompt.
+ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[=>()][0-9A-Za-z]?")
 
 passed = failed = 0
 SCEN = ""
