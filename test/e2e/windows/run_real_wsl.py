@@ -113,6 +113,9 @@ def run_bat(distro, round_name, dev_tools=False):
         check("is already installed - skipping install," in out, "not detected as already installed")
     else:
         check("Installing " in out and "already installed - skipping install" not in out, "did not run the install")
+        # Real lookups on a PC where WSL 2 works: checked, and no warning.
+        check("Checking that this PC can run WSL 2 ..." in out, "preflight did not run before the install")
+        check("Continue anyway?" not in out, "preflight warned on a PC that runs WSL 2")
         check(distro.lower() in [n.lower() for n in registered()], f"{distro} not registered after the install")
     for s in (f'[OK] User "{USER}" is registered in', f'[OK] "{USER}" is set as the default user',
               '[OK] Typing "wsl" in any cmd/PowerShell window now logs straight'):

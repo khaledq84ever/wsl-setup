@@ -285,6 +285,22 @@ if [ "${SKIPPED:-0}" != 1 ]; then
 fi
 end_scenario
 
+# Before anything is typed: preflight.ps1 warns that virtualization is off
+# (its lookups replaced by env hooks - Wine has none of them) and the user
+# answers n -> back to the main menu, nothing asked, nothing installed.
+echo "=== E2E 8-preflight: virtualization off -> warned, n goes back to the menu ==="
+WSL_SETUP_PREFLIGHT_VMP=Disabled WSL_SETUP_PREFLIGHT_HV=False WSL_SETUP_PREFLIGHT_FW=False \
+run_scenario "preflight" '{"installed":[],"online":"utf16"}' "[
+  [$MENU, \"1\"], [$MENU, \"6\"], [\"Continue anyway? [y/n]: \", \"n\"],
+  [$MENU, \"0\"], [\"Done.\", null], [$KEY, \"\"]]"
+if [ "${SKIPPED:-0}" != 1 ]; then
+    has "[WARN] Virtualization is turned off in this PC's BIOS/UEFI setup."
+    has '[INFO] Virtual Machine Platform is not turned on yet.'
+    grep -qF 'New Linux username' "$OUT" && bad "asked for a username after n" || ok
+    [ -z "$(calls installs)" ] && ok || bad "installed [$(calls installs)] after n"
+fi
+end_scenario
+
 echo
 echo "============================================"
 echo " E2E RESULTS: $pass passed, $fail failed"

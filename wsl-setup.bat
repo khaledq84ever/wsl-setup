@@ -87,7 +87,7 @@ REM --- The helper files must sit next to this script. Check them all up
 REM     front, so a partial download fails here with a clear list instead of
 REM     halfway through an install.
 set "missing="
-for %%F in (setup-user.sh list-distros.ps1 install-distro.ps1 wait-distro.ps1 wsl-status.ps1 diag.ps1 start.bat) do (
+for %%F in (setup-user.sh list-distros.ps1 install-distro.ps1 wait-distro.ps1 wsl-status.ps1 diag.ps1 preflight.ps1 start.bat) do (
     if not exist "!SELF_DIR!%%F" set "missing=!missing! %%F"
 )
 if defined missing (
@@ -255,6 +255,45 @@ echo %CLR_CYAN%=========================================================%CLR_RES
 echo   Selected: !selectedFriendly!   [wsl.exe --install -d !selectedName!]
 echo %CLR_CYAN%=========================================================%CLR_RESET%
 echo.
+echo Checking whether !selectedFriendly! is already installed ...
+REM  Ask the registry instead of parsing `wsl.exe -l -q`: older wsl.exe builds
+REM  ignore WSL_UTF8 and print UTF-16, which `for /f` reads as garbage, so the
+REM  check silently said "not installed" and a re-run then died trying to
+REM  install a distro that already exists. Every registered distro has a
+REM  DistributionName value under this key; the lookup is case-insensitive.
+REM  The name reaches PowerShell as an env var, never spliced into the command.
+set "alreadyInstalled=0"
+set "WSL_SETUP_DISTRO=!selectedName!"
+powershell -NoProfile -Command "$n = $env:WSL_SETUP_DISTRO; $hit = Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss' -ErrorAction SilentlyContinue | Where-Object { $_.GetValue('DistributionName') -eq $n }; if ($hit) { exit 0 } else { exit 1 }"
+if "!errorlevel!"=="0" set "alreadyInstalled=1"
+
+REM  Before anything is typed or installed: can this PC run WSL 2 at all?
+REM  preflight.ps1 prints its own advice (virtualization off in the firmware,
+REM  Virtual Machine Platform off or waiting for a restart) and exits 1 when
+REM  the user should decide whether to go on (3, not 1: PowerShell itself
+REM  exits 1 when a script fails, and that must not look like a warning).
+REM  It never blocks: the install may still work, and wsl.exe reports real
+REM  problems itself. The advice is about installing, so a distro that is
+REM  already installed is not checked.
+if "!alreadyInstalled!"=="1" (
+    echo !selectedFriendly! is already installed - skipping install,
+    echo continuing straight to account setup.
+) else (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "!SELF_DIR!preflight.ps1"
+    if "!errorlevel!"=="3" goto PREFLIGHTWARN
+)
+goto ACCOUNT
+
+REM  Compared with delayed expansion only, like the menus.
+:PREFLIGHTWARN
+set "goOn="
+set /p goOn="Continue anyway? [y/n]: "
+if /i "!goOn!"=="y" goto ACCOUNT
+if /i "!goOn!"=="n" goto MENU
+goto PREFLIGHTWARN
+
+:ACCOUNT
+echo.
 echo   Set up the Linux account now - it will be created
 echo   automatically, no need to type anything during install.
 echo.
@@ -317,22 +356,7 @@ if "!PASS_B64!"=="" (
 )
 
 echo.
-echo Checking whether !selectedFriendly! is already installed ...
-REM  Ask the registry instead of parsing `wsl.exe -l -q`: older wsl.exe builds
-REM  ignore WSL_UTF8 and print UTF-16, which `for /f` reads as garbage, so the
-REM  check silently said "not installed" and a re-run then died trying to
-REM  install a distro that already exists. Every registered distro has a
-REM  DistributionName value under this key; the lookup is case-insensitive.
-REM  The name reaches PowerShell as an env var, never spliced into the command.
-set "alreadyInstalled=0"
-set "WSL_SETUP_DISTRO=!selectedName!"
-powershell -NoProfile -Command "$n = $env:WSL_SETUP_DISTRO; $hit = Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss' -ErrorAction SilentlyContinue | Where-Object { $_.GetValue('DistributionName') -eq $n }; if ($hit) { exit 0 } else { exit 1 }"
-if "!errorlevel!"=="0" set "alreadyInstalled=1"
-
-if "!alreadyInstalled!"=="1" (
-    echo !selectedFriendly! is already installed - skipping install,
-    echo continuing straight to account setup.
-) else (
+if "!alreadyInstalled!"=="0" (
     echo Installing !selectedFriendly! ...
     echo ^(--web-download is used to avoid a known WSL bug where install
     echo   can hang at 0.0%% - see Microsoft's WSL install docs^)

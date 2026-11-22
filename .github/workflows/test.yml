@@ -126,8 +126,8 @@ jobs:
             tests: list-distros
           - helpers: status
             tests: wsl-status
-          - helpers: diag
-            tests: diag
+          - helpers: diag preflight
+            tests: diag preflight
     steps:
       - uses: actions/checkout@v7
 
