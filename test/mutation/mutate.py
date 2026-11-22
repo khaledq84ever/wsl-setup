@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """mutate.py - mutation run for the helper scripts wsl-setup.bat ships: the
-five PowerShell helpers and the two shell scripts that run inside the distro.
+six PowerShell helpers and the two shell scripts that run inside the distro.
 
 For each helper it plants one deliberate bug at a time (wrong exit code,
 inverted check, a dropped argument, a removed safety step ...), runs that
@@ -10,7 +10,7 @@ in the tests, not in the helper.
 
   python3 test/mutation/mutate.py                 all helpers
   python3 test/mutation/mutate.py wait install    only these (wait, install, list, status,
-                                                  diag, user, devtools)
+                                                  diag, preflight, user, devtools)
 
 PWSH=... picks the PowerShell (default pwsh); PWSH=powershell runs it on
 Windows PowerShell 5.1, as the CI "mutation" job does. Mutants marked PS51
@@ -164,12 +164,31 @@ DIAG = [
  ("WIN: default distro not marked", "if ($def -and $s.PSChildName -eq $def)", "if ($def -and $s.PSChildName -ne $def)"),
 ]
 
+PREFLIGHT = [
+ ("a running hypervisor no longer overrides the firmware flag", "if ($hv -ne 'True' -and $fw -eq 'False') {", "if ($fw -eq 'False') {"),
+ ("an unreadable firmware flag counts as off", "if ($hv -ne 'True' -and $fw -eq 'False') {", "if ($hv -ne 'True' -and $fw -ne 'True') {"),
+ ("virtualization off is no warning", "    $warn = $true\n    Say '[WARN]' Yellow @(\n        'Virtualization", "    Say '[WARN]' Yellow @(\n        'Virtualization"),
+ ("restart due is no warning", "    $warn = $true\n    Say '[WARN]' Yellow @(\n        'Virtual Machine Platform was", "    Say '[WARN]' Yellow @(\n        'Virtual Machine Platform was"),
+ ("restart due not recognised", "if ($vmp -eq 'EnablePending') {", "if ($vmp -eq 'NoSuchState') {"),
+ ("DisablePending not treated as off", " -or $vmp -eq 'DisablePending') {", ") {"),
+ ("VMP off not explained", "} elseif ($vmp -eq 'Disabled' -or", "} elseif ($vmp -eq 'NoSuchState' -or"),
+ ("warning exits 1 (looks like a script failure)", "if ($warn) { exit 3 }", "if ($warn) { exit 1 }"),
+ ("warning exits 0", "if ($warn) { exit 3 }", "if ($warn) { exit 0 }"),
+ ("no warning still exits 3", "if ($warn) { exit 3 }\nexit 0", "if ($warn) { exit 3 }\nexit 3"),
+ ("env hook for the firmware flag ignored", "[string]$FirmwareVirt = $env:WSL_SETUP_PREFLIGHT_FW", "[string]$FirmwareVirt = ''"),
+ ("env hook for VMP ignored", "[string]$VmpFeature = $env:WSL_SETUP_PREFLIGHT_VMP,", "[string]$VmpFeature = '',"),
+ ("first line of each message dropped", "    Write-Host (' ' + $lines[0])\n", "    Write-Host ''\n"),
+ ("rest of each message dropped", "@($lines | Select-Object -Skip 1)", "@($lines | Select-Object -Skip 99)"),
+ ("header dropped", "Write-Host 'Checking that this PC can run WSL 2 ...'\n", ""),
+]
+
 TARGETS = {
     "wait":    ("wait-distro.ps1",    "install-wait.tests.ps1", WAIT),
     "install": ("install-distro.ps1", "install-wait.tests.ps1", INSTALL),
     "list":    ("list-distros.ps1",   "list-distros.tests.ps1", LIST),
     "status":  ("wsl-status.ps1",     "wsl-status.tests.ps1",   STATUS),
     "diag":    ("diag.ps1",           "diag.tests.ps1",         DIAG),
+    "preflight": ("preflight.ps1",    "preflight.tests.ps1",    PREFLIGHT),
     "user":     ("setup-user.sh",      "run-tests.sh", USER),
     "devtools": ("setup-dev-tools.sh", "run-tests.sh", DEVTOOLS),
 }

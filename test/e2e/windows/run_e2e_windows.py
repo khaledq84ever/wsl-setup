@@ -244,6 +244,8 @@ def main():
     MENU, USER, KEY = "Choose an option: ", "New Linux username: ", "Press any key"
     PWD1, PWD2 = "New Linux password", "Confirm password"
     DEV = "[y/n]: "
+    GO = "Continue anyway? [y/n]: "
+    BAD_VIRT = {"WSL_SETUP_PREFLIGHT_VMP": "Disabled", "WSL_SETUP_PREFLIGHT_HV": "False", "WSL_SETUP_PREFLIGHT_FW": "False"}
     finish = [["Registration complete.", None], [KEY, ""], [DEV, "n"], [MENU, "0"], ["Done.", None], [KEY, ""]]
     shown = []
     try:
@@ -266,6 +268,9 @@ def main():
         check('"Dev" is not a valid Linux username.' in out, "Dev not rejected")
         check("The passwords did not match" in out, "mismatch not reported")
         check(installs(st) == ["Ubuntu-24.04"], f"installed {installs(st)}")
+        # The real lookups on the runner, where WSL 2 works: checked, no warning.
+        check("Checking that this PC can run WSL 2 ..." in out, "preflight did not run")
+        check("Continue anyway?" not in out and "[WARN] Virtualization" not in out, "preflight warned on a PC that runs WSL 2")
         root = os.path.join(st, "root-Ubuntu-24.04")
         check(read(os.path.join(root, "chpasswd.log")).strip("\n") == "dev:" + PW,
               f"chpasswd got {read(os.path.join(root, 'chpasswd.log'))!r}")
@@ -299,8 +304,11 @@ def main():
             ["Registration complete.", None], [KEY, ""], [DEV, "n"],
             # Post-install menu: bad input, then 1 = Start WSL now, back to the menu, 0 = Exit.
             [MENU, "y"], [MENU, "1"], ["fake shell as dev", None], [MENU, "0"], ["Done.", None], [KEY, ""]],
-            work, bindir, bash)
+            work, bindir, bash, extra_env=BAD_VIRT)
         before = failed
+        # Already installed: preflight is skipped, even with virtualization "off".
+        check("Checking that this PC can run WSL 2" not in out and "Continue anyway?" not in out,
+              "preflight ran for a distro that is already installed")
         for line in ("Setup finished. What next?", "1.  Start WSL now", "2.  Install another distro"):
             check(line in out, f"post-install menu lacks {line!r}")
         check('"y" is not a valid option.' in out, "bad post-install choice not rejected")
@@ -310,6 +318,32 @@ def main():
         check("Debian GNU/Linux is already installed - skipping install," in out, "not detected as installed")
         check(installs(st) == [], f"re-run installed {installs(st)}")
         check(read(os.path.join(st, "root-Debian", "chpasswd.log")).strip("\n") == "dev:" + PW, "re-run chpasswd")
+        if failed > before: shown.append(st)
+
+        print("=== WIN E2E 2b: virtualization off -> warned; bad answer, then n -> main menu ===", flush=True)
+        st, out = run_scenario("preflight-stop", {"installed": [], "online": "utf16"}, [
+            [MENU, "1"], [MENU, "6"], [GO, "x"], [GO, "n"], [MENU, "0"], ["Done.", None], [KEY, ""]],
+            work, bindir, bash, extra_env=dict(BAD_VIRT, WSL_SETUP_PREFLIGHT_VMP="Enabled"))
+        before = failed
+        check("[WARN] Virtualization is turned off in this PC's BIOS/UEFI setup." in out, "no virtualization warning")
+        check("Intel VT-x" in out and "AMD-V / SVM Mode" in out, "no BIOS hint")
+        check("[INFO]" not in out, "VMP info shown although VMP is on")
+        check(out.count(GO) == 2, "bad answer did not ask again")
+        check(USER not in out, "asked for a username after n")
+        check(installs(st) == [], f"installed {installs(st)} after n")
+        check(out.count("1.  Install a Linux distro") == 2, "main menu did not come back after n")
+        if failed > before: shown.append(st)
+
+        print("=== WIN E2E 2c: virtualization + VMP off -> warned, y -> installs as usual ===", flush=True)
+        st, out = run_scenario("preflight-go", {"installed": [], "online": "utf16"}, [
+            [MENU, "1"], [MENU, "6"], [GO, "y"], [USER, "dev"], [PWD1, PW], [PWD2, PW]] + finish,
+            work, bindir, bash, extra_env=BAD_VIRT)
+        before = failed
+        check("[WARN] Virtualization is turned off" in out and "[INFO] Virtual Machine Platform is not turned on yet." in out,
+              "warning or VMP info missing")
+        check(out.find(GO) < out.find(USER), "account questions came before the warning")
+        check(installs(st) == ["Ubuntu-24.04"], f"installed {installs(st)} after y")
+        check("Registration complete." in out, "setup did not finish after y")
         if failed > before: shown.append(st)
 
         print("=== WIN E2E 3: online list unavailable -> fallback menu, 1 -> Ubuntu ===", flush=True)
