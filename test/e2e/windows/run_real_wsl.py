@@ -19,7 +19,7 @@ Reuses the real-console driver from run_e2e_windows.py. Like that script it
 refuses to run unless E2E_WINDOWS_CI=1: it creates a sudo-enabled account in
 whichever distro WSL_DISTRO names - CI machines only.
 """
-import os, re, subprocess, sys, tempfile, winreg
+import base64, glob, os, re, subprocess, sys, tempfile, winreg
 
 import run_e2e_windows as base  # exits unless E2E_WINDOWS_CI=1
 from run_e2e_windows import Console, REPO, LXSS
@@ -177,6 +177,35 @@ def check_launcher():
     check("[ERROR]" not in out, f"start.bat reported an error: {out[-400:]!r}")
 
 
+def check_diag(distro):
+    """Main menu 3 against real WSL: the report shows the real version, the
+    distro as the default, and a clean start of it - and no password."""
+    print("=== REAL WSL diagnostics report: menu 3 ===", flush=True)
+    for old in glob.glob(os.path.join(REPO, "wsl-setup-report-*.txt")):
+        os.remove(old)
+    env = dict(os.environ, WSL_SETUP_DIAG_NO_OPEN="1")
+    con = Console(["cmd.exe", "/c", os.path.join(REPO, "wsl-setup.bat")], REPO, env)
+    err = con.drive([[MENU, "3"], ["Report saved: ", None, 300], [KEY, ""], [MENU, "0"], ["Done.", None], [KEY, ""]])
+    out = con.text()
+    check(err is None, f"diag driver: {err}")
+    reports = glob.glob(os.path.join(REPO, "wsl-setup-report-*.txt"))
+    check(len(reports) == 1, f"want 1 report next to the .bat, found {reports}")
+    rep = open(reports[0], encoding="utf-8-sig").read() if reports else ""
+    for r in reports:
+        os.remove(r)
+    if err or len(reports) != 1:
+        print(f"----- diag console tail -----\n{out[-3000:]}\n-----", flush=True)
+    for want in ("--- wsl --version (exit code 0) ---", "--- wsl --status (exit code 0) ---",
+                 "--- wsl -- true (exit code 0) ---", "Administrator: yes", "Windows Subsystem for Linux: Enabled"):
+        check(want in rep, f"report lacks {want!r}")
+    check(re.search(r"(?m)^\* " + re.escape(distro) + r"   \(WSL 2, state \d+\)", rep) is not None,
+          f"report does not list {distro} as the default WSL 2 distro")
+    check(re.search(r"\d+\.\d+\.\d+", rep.split("--- wsl --version", 1)[-1][:200]) is not None,
+          "no version number after wsl --version (output not decoded?)")
+    check("\0" not in rep, "NUL characters in the report")
+    check(PW not in rep and base64.b64encode(PW.encode()).decode() not in rep, "the password is in the report")
+
+
 def main():
     distro = os.environ.get("WSL_DISTRO", "Debian")
     print(f"registered before the test: {registered()}", flush=True)
@@ -192,6 +221,7 @@ def main():
         if broke:
             shown.append((rnd, out))
     check_launcher()
+    check_diag(distro)
     for rnd, out in shown:
         print(f"----- {rnd} console -----\n{out}\n-----")
     print(f"\n REAL WSL RESULTS: {passed} passed, {failed} failed", flush=True)

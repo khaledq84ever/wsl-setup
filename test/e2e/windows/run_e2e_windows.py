@@ -14,7 +14,7 @@ for throwaway CI machines, not your PC.
 
 Needs: Windows, Python 3 with pywinpty, Git for Windows (bash).
 """
-import json, os, re, shutil, subprocess, sys, tempfile, threading, time, uuid, winreg
+import base64, glob, json, os, re, shutil, subprocess, sys, tempfile, threading, time, uuid, winreg
 
 if os.environ.get("E2E_WINDOWS_CI") != "1":
     sys.exit("refusing to run: set E2E_WINDOWS_CI=1 (this test hides System32\\wsl.exe; CI machines only)")
@@ -437,12 +437,44 @@ def main():
             check(n == 2, f"WSL status checked {n} times, want 2 (start, and again after the failed wait)")
             if failed > before: shown.append(st)
 
+        # Main menu 3 = diagnostics report, after a failed install: a password
+        # has been typed in this window and must not reach the report or any
+        # wsl.exe call. Debian is registered for real in HKCU (pre_register),
+        # the default "Gone" does not exist, so starting it fails with
+        # wsl.exe's own error - the case the report is for.
+        print("=== WIN E2E 5-diag: install fails, then menu 3 saves a diagnostics report ===", flush=True)
+        st, out = run_scenario("diag", {"installed": ["Debian"], "online": "utf16", "install_fail": True, "default": "Gone"}, [
+            [MENU, "1"], [MENU, "6"], [USER, "dev"], [PWD1, PW], [PWD2, PW],
+            ["wsl.exe --install failed", None], [KEY, ""],
+            [MENU, "3"], ["Report saved: ", None], [KEY, ""], [MENU, "0"], ["Done.", None], [KEY, ""]],
+            work, bindir, bash, extra_env={"WSL_SETUP_DIAG_NO_OPEN": "1"})
+        before = failed
+        check("3.  Save a diagnostics report - to send when asking for help" in out, "main menu lacks entry 3")
+        check("For help, choose 3 in the main menu: it saves a report you can send." in out, "install failure has no pointer to the report")
+        reports = glob.glob(os.path.join(glob.escape(os.path.join(st, APPDIR)), "wsl-setup-report-*.txt"))
+        check(len(reports) == 1, f"want 1 report next to the .bat (folder {APPDIR!r}), found {reports}")
+        rep = open(reports[0], encoding="utf-8-sig").read() if reports else ""
+        check(bool(reports) and os.path.basename(reports[0]) in out, "console does not show the report's path")
+        for want in ("wsl-setup diagnostics report", "Administrator: yes", "Windows Subsystem for Linux: Enabled",
+                     "--- wsl --version (exit code 0) ---", "WSL version: 2.6.1.0", "Default Distribution: Gone",
+                     "There is no distribution with the supplied name.", "  Debian"):
+            check(want in rep, f"report lacks {want!r}")
+        for unwanted in ("Edition: unknown", "Virtual Machine Platform: unknown", "Hypervisor running: unknown", "\0"):
+            check(unwanted not in rep, f"report has {unwanted!r}")
+        check(PW not in rep, "the password is in the report")
+        check(base64.b64encode(PW.encode()).decode() not in rep, "the base64 password is in the report")
+        check(not any("PASS_B64" in c["forwarded"] or "USER_B64" in c["forwarded"] for c in calls(st)),
+              "credentials forwarded to a wsl.exe call")
+        check(sum(1 for c in calls(st) if c["argv"] == ["--status"]) == 1, "diag.ps1 did not ask wsl --status once")
+        if failed > before: shown.append(st)
+
         print("=== WIN E2E 6: start.bat, no distro for this account -> says why, waits ===", flush=True)
         st, out = run_scenario("start-nodistro", {"installed": [], "default": ""}, [[KEY, ""]],
                                work, bindir, bash, bat="start.bat")
         before = failed
         check("[ERROR] No Linux distro is installed for this Windows account" in out, "no-distro case not explained")
         check("Restart Windows, run wsl-setup.bat again" in out, "restart hint missing")
+        check("To ask for help: run wsl-setup.bat and choose 3." in out, "no pointer to the diagnostics report")
         check(not any(c["argv"] == [] for c in calls(st)), "opened a shell although no distro is registered")
         if failed > before: shown.append(st)
 
