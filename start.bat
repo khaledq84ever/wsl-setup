@@ -113,5 +113,8 @@ goto FAIL
 
 :FAIL
 echo.
+echo   To ask for help: run wsl-setup.bat and choose 3. It saves a report
+echo   about WSL on this PC ^(no passwords in it^) that you can send.
+echo.
 pause
 exit /b 1

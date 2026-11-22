@@ -87,7 +87,7 @@ REM --- The helper files must sit next to this script. Check them all up
 REM     front, so a partial download fails here with a clear list instead of
 REM     halfway through an install.
 set "missing="
-for %%F in (setup-user.sh list-distros.ps1 install-distro.ps1 wait-distro.ps1 wsl-status.ps1 start.bat) do (
+for %%F in (setup-user.sh list-distros.ps1 install-distro.ps1 wait-distro.ps1 wsl-status.ps1 diag.ps1 start.bat) do (
     if not exist "!SELF_DIR!%%F" set "missing=!missing! %%F"
 )
 if defined missing (
@@ -118,6 +118,7 @@ if "!WSLSTATE!"=="INFO" echo   %CLR_YELLOW%[INFO]%CLR_RESET% !WSLSTATUS!
 echo.
 echo   1.  Install a Linux distro
 echo   2.  Start WSL - open the distro you already installed
+echo   3.  Save a diagnostics report - to send when asking for help
 echo   0.  Exit
 echo.
 echo   First time installing WSL on this PC? A restart may be
@@ -133,6 +134,7 @@ set /p choice="Choose an option: "
 if "!choice!"=="0" goto END
 if "!choice!"=="1" goto DISTROMENU
 if "!choice!"=="2" goto STARTWSL
+if "!choice!"=="3" goto DIAG
 echo.
 echo %CLR_RED%[ERROR]%CLR_RESET% "!choice!" is not a valid option.
 echo.
@@ -146,6 +148,20 @@ REM     says why and waits for a key itself; either way the menu comes back.
 echo.
 call "!SELF_DIR!start.bat"
 title WSL Setup
+goto MENU
+
+REM --- Menu entry "Save a diagnostics report": diag.ps1 writes what Windows
+REM     and wsl.exe say about WSL into a text file next to this script (or
+REM     the temp folder) and opens it in Notepad. It prints the path itself:
+REM     a path read back through `for /f` would lose a "!" in it. Credentials
+REM     are cleared first; diag.ps1 also keeps them from wsl.exe and out of
+REM     the report on its own.
+:DIAG
+call :CLEARCREDS
+echo.
+powershell -NoProfile -ExecutionPolicy Bypass -File "!SELF_DIR!diag.ps1"
+echo.
+pause
 goto MENU
 
 REM --- Distro list (main menu entry 1, and "install another") ---
@@ -331,6 +347,7 @@ if "!alreadyInstalled!"=="1" (
         echo         If this is the very first WSL install on this PC, Windows
         echo         may need a restart to finish enabling WSL. Restart, then
         echo         run this tool again.
+        echo         For help, choose 3 in the main menu: it saves a report you can send.
         call :CLEARCREDS
         pause
         goto MENUFRESH
@@ -353,6 +370,7 @@ if "!waitResult!"=="2" (
     echo         finish starting until you reboot. Restart your PC, then run
     echo         this tool again and pick the same option - it will pick up
     echo         where it left off.
+    echo         For help, choose 3 in the main menu: it saves a report you can send.
     call :CLEARCREDS
     pause
     goto MENUFRESH
@@ -363,6 +381,7 @@ echo         Try launching it manually first: wsl -d !selectedName!
 echo         If that also hangs, Windows may need a restart to finish
 echo         enabling WSL. Restart your PC, then run this tool again
 echo         and pick the same option - it will pick up where it left off.
+echo         For help, choose 3 in the main menu: it saves a report you can send.
 call :CLEARCREDS
 pause
 goto MENUFRESH
@@ -422,6 +441,7 @@ wsl.exe -d !selectedName! -u root -- rm -f "!TMPSCRIPT!" >nul 2>&1
 
 if not "!userScriptResult!"=="0" (
     echo %CLR_RED%[ERROR]%CLR_RESET% Creating the Linux user failed inside !selectedFriendly!. See output above.
+    echo         For help, choose 3 in the main menu: it saves a report you can send.
     set "wslUser="
     pause
     goto MENU
@@ -601,6 +621,7 @@ echo %CLR_RED%[ERROR]%CLR_RESET% Could not copy setup-user.sh into !selectedFrie
 echo         was created. See any output above, then try again. If this
 echo         folder is on a drive WSL cannot see, such as some network
 echo         shares, copy the folder to C:\ and run it from there.
+echo         For help, choose 3 in the main menu: it saves a report you can send.
 if defined TMPSCRIPT wsl.exe -d !selectedName! -u root -- rm -f "!TMPSCRIPT!" >nul 2>&1
 call :CLEARCREDS
 set "wslUser="

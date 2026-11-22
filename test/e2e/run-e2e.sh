@@ -258,6 +258,33 @@ for kind in reboot notready; do
     end_scenario
 done
 
+# Main menu 3 saves a diagnostics report. Run after a failed install, so a
+# password has been typed in this window: it must not reach the report, nor
+# any wsl.exe call that diag.ps1 makes.
+echo "=== E2E 7-diag: install fails, then menu 3 saves a diagnostics report ==="
+WSL_SETUP_DIAG_NO_OPEN=1 \
+run_scenario "diag" '{"installed":[],"online":"utf16","install_fail":true,"default":"Gone"}' "[
+  [$MENU, \"1\"], [$MENU, \"6\"], [$USER, \"dev\"], [\"@PASSWORD\", $PWJ],
+  [\"wsl.exe --install failed\", null], [$KEY, \"\"],
+  [$MENU, \"3\"], [\"Report saved: \", null], [$KEY, \"\"], [$MENU, \"0\"], [\"Done.\", null], [$KEY, \"\"]]"
+if [ "${SKIPPED:-0}" != 1 ]; then
+    has 'For help, choose 3 in the main menu: it saves a report you can send.'
+    has 'Report saved: '
+    REPORTS=("$APP"/wsl-setup-report-*.txt)
+    [ "${#REPORTS[@]}" = 1 ] && [ -f "${REPORTS[0]}" ] && ok || bad "want 1 report next to the .bat, found: ${REPORTS[*]}"
+    R=${REPORTS[0]}
+    for want in 'wsl-setup diagnostics report' '--- wsl --version (exit code 0) ---' 'WSL version: 2.6.1.0' \
+                'Default Distribution: Gone' 'There is no distribution with the supplied name.' '== Linux distros for this account =='; do
+        grep -qF -- "$want" "$R" && ok || bad "report lacks: $want"
+    done
+    grep -qF -- "$PW" "$R" && bad "the password is in the report" || ok
+    grep -qF -- "$(printf '%s' "$PW" | base64 -w0)" "$R" && bad "the base64 password is in the report" || ok
+    [ "$(calls fwdcount)" = "0" ] && ok || bad "credentials forwarded to $(calls fwdcount) call(s)"
+    n=$(grep -c '"--status"' "$ST/calls.jsonl" || true)
+    [ "$n" = "1" ] && ok || bad "wsl --status asked $n times, want 1 (by diag.ps1)"
+fi
+end_scenario
+
 echo
 echo "============================================"
 echo " E2E RESULTS: $pass passed, $fail failed"

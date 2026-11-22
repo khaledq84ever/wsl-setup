@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """mutate.py - mutation run for the helper scripts wsl-setup.bat ships: the
-four PowerShell helpers and the two shell scripts that run inside the distro.
+five PowerShell helpers and the two shell scripts that run inside the distro.
 
 For each helper it plants one deliberate bug at a time (wrong exit code,
 inverted check, a dropped argument, a removed safety step ...), runs that
@@ -10,11 +10,12 @@ in the tests, not in the helper.
 
   python3 test/mutation/mutate.py                 all helpers
   python3 test/mutation/mutate.py wait install    only these (wait, install, list, status,
-                                                  user, devtools)
+                                                  diag, user, devtools)
 
 PWSH=... picks the PowerShell (default pwsh); PWSH=powershell runs it on
 Windows PowerShell 5.1, as the CI "mutation" job does. Mutants marked PS51
-only show on 5.1 (they undo a 5.1 workaround) and are skipped elsewhere.
+only show on 5.1 (they undo a 5.1 workaround) and are skipped elsewhere;
+mutants marked WIN need the Windows registry and are skipped off Windows.
 
 The shell scripts (user, devtools) are tested by test/run-tests.sh, run here
 with ITER=2 and without its PowerShell and end-to-end parts. Only
@@ -138,11 +139,37 @@ DEVTOOLS = [
  ("wsl.conf overwritten instead of appended", "| $SUDO tee -a \"$conf\" >/dev/null", "| $SUDO tee \"$conf\" >/dev/null"),
 ]
 
+DIAG = [
+ ("password (base64) not removed from the text", "foreach ($s in $secrets) { if ($s) { $text = $text.Replace($s, '[removed]') } }\n", ""),
+ ("plain password not removed from the text", "        if ($plain.Length -ge 4) { $secrets += $plain }\n", ""),
+ ("PASS_B64/USER_B64 left in the environment of wsl.exe", "Remove-Item Env:PASS_B64, Env:USER_B64 -ErrorAction SilentlyContinue\n", ""),
+ ("credentials left in WSLENV", "if ($env:WSLENV) {\n    $keep", "if ($false) {\n    $keep"),
+ ("the rest of WSLENV dropped too", "if ($keep.Count) { $env:WSLENV = $keep -join ':' }", "if ($false) { }"),
+ ("no temp-folder fallback", "foreach ($dir in @($OutDir, [IO.Path]::GetTempPath())) {", "foreach ($dir in @($OutDir)) {"),
+ ("not saved: exit 1 -> exit 0", "anywhere. Copy the folder to C:\\ and try again.'\n    exit 1", "anywhere. Copy the folder to C:\\ and try again.'\n    exit 0"),
+ ("saved: exit 0 -> exit 1", "catch { }\n}\nexit 0\n", "catch { }\n}\nexit 1\n"),
+ ("no timeout on wsl.exe", "if (-not $p.WaitForExit($Seconds * 1000)) {", "if (-not $p.WaitForExit(-1)) {"),
+ ("stderr of wsl.exe dropped", ' + "`n" + (ConvertFrom-WslBytes $err.ToArray())', ""),
+ ("UTF-16 output not decoded", [
+     ("        return [Text.Encoding]::Unicode.GetString($Bytes)\n    }\n    return [Text.Encoding]::UTF8", "        return [Text.Encoding]::UTF8.GetString($Bytes)\n    }\n    return [Text.Encoding]::UTF8"),
+     (".ToArray())) -replace \"`0\", ''", ".ToArray()))")], None),
+ ("exit code of wsl.exe not shown", "(exit code $($p.ExitCode))", "(exit code 0)"),
+ ("default distro start not tried", "    Add (Invoke-Wsl '-- true' ($TimeoutSec * 2))\n", ""),
+ ("restart-pending check inverted", "Where-Object { $_ -and (Test-Path", "Where-Object { $_ -and -not (Test-Path"),
+ ("restart-pending keys not listed", '    Add (@($pending | ForEach-Object { "  $_" }))\n', ""),
+ ("firmware advice shown although a hypervisor runs", "} elseif ((YesNo $fw) -eq 'no') {", "}\nif ((YesNo $fw) -eq 'no') {"),
+ ("firmware advice never shown", "} elseif ((YesNo $fw) -eq 'no') {", "} elseif ((YesNo $fw) -eq 'never') {"),
+ ("feature state not reported", "('Virtual Machine Platform: ' + (Get-Feature $VmpFeature 'VirtualMachinePlatform'))", "('Virtual Machine Platform: ' + 'unknown')"),
+ ("WIN: distro install path written to the report", "$extra = if ($info.Count)", "$info += [string]$s.GetValue('BasePath'); $extra = if ($info.Count)"),
+ ("WIN: default distro not marked", "if ($def -and $s.PSChildName -eq $def)", "if ($def -and $s.PSChildName -ne $def)"),
+]
+
 TARGETS = {
     "wait":    ("wait-distro.ps1",    "install-wait.tests.ps1", WAIT),
     "install": ("install-distro.ps1", "install-wait.tests.ps1", INSTALL),
     "list":    ("list-distros.ps1",   "list-distros.tests.ps1", LIST),
     "status":  ("wsl-status.ps1",     "wsl-status.tests.ps1",   STATUS),
+    "diag":    ("diag.ps1",           "diag.tests.ps1",         DIAG),
     "user":     ("setup-user.sh",      "run-tests.sh", USER),
     "devtools": ("setup-dev-tools.sh", "run-tests.sh", DEVTOOLS),
 }
@@ -196,6 +223,9 @@ def mutate(key):
             edits = old if isinstance(old, list) else [(old, new)]   # a mutant may need several edits
             for o, _ in edits:
                 assert norm.count(o) == 1, f"{target}: mutant {name!r} matches {norm.count(o)} places - mutate.py is out of date"
+            if name.startswith("WIN:") and os.name != "nt":
+                print(f"skipped   {name}", flush=True)
+                continue
             if name.startswith("PS51:") and not PS51:
                 print(f"skipped   {name}", flush=True)
                 continue

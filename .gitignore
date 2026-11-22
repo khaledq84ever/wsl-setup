@@ -2,3 +2,4 @@ credentials.txt
 wsl_setup_state.txt
 __pycache__/
 *.pyc
+wsl-setup-report-*.txt
